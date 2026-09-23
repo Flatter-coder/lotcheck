@@ -365,12 +365,23 @@ export function verifyRow(row, page, http = null) {
 
   const fields = {};
   for (const f of FIELDS) fields[f] = verifyField(row[f], page, f);
+  return assembleStatus(row, fields);
+}
+
+/**
+ * The row verdict, given a state for every field. Factored out of verifyRow so
+ * the multi-page path below reaches exactly the same conclusions from exactly
+ * the same rules -- a second copy of this precedence would be a second author
+ * for "is this row confirmed". [[two-authors-per-fact]]
+ */
+function assembleStatus(row, fields) {
   const live = FIELDS.filter((f) => fields[f].state !== "absent");
   if (!live.length) return { status: "empty_row", fields, note: "this make has no coverage figures stored" };
 
   const drifted = live.filter((f) => fields[f].state === "drifted");
   const unparsed = live.filter((f) => fields[f].state === "unparsed");
   const uncited = live.filter((f) => fields[f].state === "not_covered");
+  const unread = live.filter((f) => fields[f].state === "unread");
   if (drifted.length) {
     return {
       status: "drifted", fields,
@@ -386,7 +397,101 @@ export function verifyRow(row, page, http = null) {
       note: `this page does not cover ${uncited.join(", ")} at all, so our source_url does not support ${uncited.length === 1 ? "that figure" : "those figures"}. Not a finding about the manufacturer -- find a URL that states ${uncited.length === 1 ? "it" : "them"}.`,
     };
   }
+  // EVERY field unread, all for the same reason: that reason IS the row status,
+  // exactly as it was when a row had one page and one verdict.
+  if (unread.length === live.length) {
+    const reasons = [...new Set(unread.map((f) => fields[f].reason))];
+    const why = reasons.length === 1 ? reasons[0] : "unreachable";
+    return { status: why, fields, note: SOURCE_NOTE[why] || UNREAD_NOTE[why] || UNREAD_NOTE.unreachable };
+  }
+  // SOME unread. This is the state a single source_url could never express, and
+  // it is the honest one: a figure verified against its own page is verified,
+  // and a figure whose page we could not read is not -- in the same row.
+  // Reporting the row as confirmed would publish the second as if it were the
+  // first. [[supervised-correctness-is-not-correctness]]
+  if (unread.length) {
+    return {
+      status: "partial", fields,
+      note: `${live.length - unread.length} of ${live.length} figure(s) confirmed; not re-read: `
+        + unread.map((f) => `${f} (${fields[f].reason})`).join(", "),
+    };
+  }
   return { status: "confirmed", fields, note: `all ${live.length} stored figure(s) still stated on the manufacturer's page` };
+}
+
+const UNREAD_NOTE = {
+  blocked: "the manufacturer's site answered an identified request with a refusal. The stored figures are unchanged and unverified.",
+  dead_link: "the stored source URL is gone. The page has moved or been removed; the URL needs replacing. Ours to fix.",
+  unreachable: "we could not reach the manufacturer's page; the stored figures are unchanged and unverified",
+};
+
+/**
+ * WHICH PAGE BACKS THIS FIGURE.
+ *
+ * One source_url per row cannot express how manufacturers actually publish.
+ * Measured 2026-09-23 through scripts/probe-warranty-page.mjs:
+ *
+ *   Lexus   basic/powertrain/corrosion on the new-vehicle-warranty page;
+ *           roadside only on .../coverage/roadside-assistance/ ("48 months
+ *           with unlimited kms")
+ *   Jaguar  basic + corrosion on new-vehicle-limited-warranty.html;
+ *           basic + roadside on .../ownership/warranty/index.html
+ *
+ * Neither make has one page carrying everything, so citing the page that states
+ * roadside UN-cites the other three fields. Swapping the URL trades one false
+ * "uncited" for three. field_sources lets a figure name the document that
+ * actually states it, and falls back to source_url where there is nothing to
+ * say -- which is 37 of 39 makes, unchanged.
+ */
+export function sourceForField(row, field) {
+  const fs = row && row.field_sources;
+  const u = fs && typeof fs === "object" && !Array.isArray(fs) ? fs[field] : null;
+  return (typeof u === "string" && u.trim()) ? u.trim() : ((row && row.source_url) || null);
+}
+
+/** Distinct URLs a row needs fetched, so one page is never fetched twice. */
+export function rowSourceUrls(row) {
+  const out = [];
+  for (const f of FIELDS) {
+    const u = sourceForField(row, f);
+    // Only fields we actually hold a figure for are worth a request.
+    if (u && row && row[f] != null && String(row[f]).trim() !== "" && !out.includes(u)) out.push(u);
+  }
+  return out;
+}
+
+/** Why a field could not be read: the same four words the row status uses. */
+function unreadReason(url, http) {
+  const src = sourceUrlOf(url);
+  if (!src.url) return src.why;                       // no_source | bad_url | cites_document
+  const code = Number(http) || 0;
+  if (code === 403 || code === 401 || code === 429) return "blocked";
+  if (code === 404 || code === 410) return "dead_link";
+  return "unreachable";
+}
+
+/**
+ * Verify a row whose figures may cite different documents.
+ *
+ * `fetched` maps URL -> { page, http }. A field whose page is missing, or is a
+ * shell with no warranty term on it, is UNREAD -- not drifted and not uncited.
+ * Calling it either of those would be an accusation (the maker changed it) or a
+ * task (go find a better URL) off the back of a page we never read.
+ */
+export function verifyRowFields(row, fetched) {
+  const fields = {};
+  for (const f of FIELDS) {
+    const term = row ? row[f] : null;
+    if (term == null || String(term).trim() === "") { fields[f] = { state: "absent", pairs: [] }; continue; }
+    const url = sourceForField(row, f);
+    const got = (fetched && fetched[url]) || { page: null, http: null };
+    if (got.page == null || !pageStatesAnyTerm(got.page)) {
+      fields[f] = { state: "unread", pairs: [], reason: unreadReason(url, got.http), url };
+      continue;
+    }
+    fields[f] = { ...verifyField(term, got.page, f), url };
+  }
+  return assembleStatus(row, fields);
 }
 
 export const VERIFY_FIELDS = FIELDS;

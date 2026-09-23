@@ -20,7 +20,8 @@
 // Run: npm run test:warranty-verify
 
 import { readFileSync } from "node:fs";
-import { parseTerm, pairOnPage, verifyField, verifyRow, sourceUrlOf, normalizePage, htmlToText }
+import { parseTerm, pairOnPage, verifyField, verifyRow, sourceUrlOf, normalizePage, htmlToText,
+         verifyRowFields, sourceForField, rowSourceUrls }
   from "./lib/warranty-verify.mjs";
 
 let failed = 0;
@@ -421,6 +422,124 @@ console.log("\npart 12 -- a subject we could not recognise reads as a figure we 
   check("...and keeps the body text either side of a stripped tag apart",
     /80,000 km\s+6\s+New Car/.test(htmlToText("<span>80,000 km<sup>6</sup> New Car Limited Warranty</span>")),
     htmlToText("<span>80,000 km<sup>6</sup> New Car Limited Warranty</span>"));
+}
+
+
+/* ── a figure may cite the document that states it ──────────────────── */
+console.log("\npart 13 -- one url per row cannot express how makers publish");
+{
+  // Measured 2026-09-23. Lexus states basic/powertrain/corrosion on its
+  // new-vehicle-warranty page and NO roadside term there; roadside is on a
+  // separate page. With one source_url the row reported UNCITED and told a
+  // human to go find a better URL -- so swapping to the roadside page would
+  // have traded one false uncited for three.
+  const WARRANTY = "Comprehensive Coverage 48 months/80,000 km, whichever comes first. "
+    + "Powertrain & Safety Restraints 72 months/110,000 km, whichever comes first. "
+    + "Corrosion Perforation 72 months, regardless of distance travelled.";
+  const ROADSIDE = "program coverage terms new vehicles 48 months/unlimited kms "
+    + "lexus certified pre-owned 24 months. roadside assistance covers 48 months with unlimited kms.";
+  const WARRANTY_URL = "https://www.lexus.ca/en/know-your-lexus/coverage/new-vehicle-warranty/";
+  const ROADSIDE_URL = "https://www.lexus.ca/en/know-your-lexus/coverage/roadside-assistance/";
+
+  const lexus = {
+    make: "Lexus", source_url: WARRANTY_URL,
+    field_sources: { roadside_assistance: ROADSIDE_URL },
+    basic_coverage: "4-year/80,000 km",
+    powertrain_coverage: "6-year/110,000 km",
+    corrosion_coverage: "6-year/unlimited km",
+    roadside_assistance: "4-year/unlimited km",
+  };
+
+  check("a field with no entry falls back to source_url",
+    sourceForField(lexus, "basic_coverage") === WARRANTY_URL, sourceForField(lexus, "basic_coverage"));
+  check("...and a field WITH an entry uses it",
+    sourceForField(lexus, "roadside_assistance") === ROADSIDE_URL, sourceForField(lexus, "roadside_assistance"));
+  check("a row with no field_sources at all still resolves to source_url",
+    sourceForField({ source_url: "https://x.ca/w" }, "roadside_assistance") === "https://x.ca/w");
+  check("rowSourceUrls returns each distinct page once",
+    rowSourceUrls(lexus).length === 2, JSON.stringify(rowSourceUrls(lexus)));
+  check("...and asks for nothing on behalf of a figure we do not hold",
+    rowSourceUrls({ source_url: "https://x.ca/w", basic_coverage: "4-year/80,000 km" }).length === 1);
+
+  const ok = verifyRowFields(lexus, {
+    [WARRANTY_URL]: { page: WARRANTY, http: 200 },
+    [ROADSIDE_URL]: { page: ROADSIDE, http: 200 },
+  });
+  check("all four figures confirm when each is read against its own document",
+    ok.status === "confirmed", `${ok.status}: ${ok.note}`);
+
+  // THE CASE THIS WHOLE CHANGE EXISTS FOR. Before field_sources the roadside
+  // page was unreachable in the only sense that mattered -- nobody fetched it --
+  // and the row said "find a URL that states it" about a figure that was right.
+  const single = verifyRow({ ...lexus, field_sources: null }, WARRANTY);
+  check("with ONE url, roadside is reported as our data to fix",
+    single.status === "uncited", single.status);
+  check("...and with field_sources the same row is confirmed",
+    ok.status === "confirmed", ok.status);
+}
+
+/* ── unread is not drifted, and not uncited ────────────────────────── */
+console.log("\npart 14 -- a page nobody read accuses nobody");
+{
+  const A = "https://maker.ca/warranty", B = "https://maker.ca/roadside";
+  const row = {
+    make: "Testmake", source_url: A, field_sources: { roadside_assistance: B },
+    basic_coverage: "4-year/80,000 km",
+    roadside_assistance: "4-year/unlimited km",
+  };
+  const PAGE_A = "New Vehicle Limited Warranty 4 years or 80,000 km, whichever comes first.";
+
+  // Second page 403s. The first figure is genuinely confirmed; the second is
+  // genuinely unverified. Reporting the row as confirmed would publish the
+  // second as though it were the first.
+  const part = verifyRowFields(row, {
+    [A]: { page: PAGE_A, http: 200 },
+    [B]: { page: null, http: 403 },
+  });
+  check("a row read in part reports PARTIAL, not confirmed",
+    part.status === "partial", `${part.status}: ${part.note}`);
+  check("...the figure that WAS read is confirmed",
+    part.fields.basic_coverage.state === "confirmed", part.fields.basic_coverage.state);
+  check("...the figure that was not is UNREAD, not drifted and not uncited",
+    part.fields.roadside_assistance.state === "unread", part.fields.roadside_assistance.state);
+  check("...and the refusal is named as the maker's, not ours",
+    part.fields.roadside_assistance.reason === "blocked", part.fields.roadside_assistance.reason);
+  check("...and the note says which figure was not re-read",
+    /roadside_assistance/.test(part.note) && /blocked/.test(part.note), part.note);
+
+  // A dead second page is OURS to fix, and says so with a different word.
+  const dead = verifyRowFields(row, {
+    [A]: { page: PAGE_A, http: 200 },
+    [B]: { page: null, http: 404 },
+  });
+  check("a 404 on the second page is dead_link, not blocked",
+    dead.fields.roadside_assistance.reason === "dead_link", dead.fields.roadside_assistance.reason);
+
+  // EVERY page failing is the old behaviour, unchanged: the row carries the
+  // shared reason as its status, exactly as it did with one url.
+  const allGone = verifyRowFields(row, {
+    [A]: { page: null, http: 403 },
+    [B]: { page: null, http: 403 },
+  });
+  check("every figure blocked reports the row as blocked, as before",
+    allGone.status === "blocked", allGone.status);
+
+  // A shell page -- fetched, but with no warranty term on it -- is UNREAD too.
+  // Calling it drift would accuse a manufacturer over a client-rendered table.
+  const shell = verifyRowFields(row, {
+    [A]: { page: PAGE_A, http: 200 },
+    [B]: { page: "Roadside Assistance. Contact us. Find a dealer. Careers.", http: 200 },
+  });
+  check("a fetched page with no term on it is unread, not drifted",
+    shell.fields.roadside_assistance.state === "unread", shell.fields.roadside_assistance.state);
+
+  // AND DRIFT STILL WINS. A figure genuinely no longer on its own page is the
+  // one finding that must never be softened into "partial".
+  const drifted = verifyRowFields(row, {
+    [A]: { page: "New Vehicle Limited Warranty 3 years or 60,000 km.", http: 200 },
+    [B]: { page: null, http: 403 },
+  });
+  check("drift outranks partial", drifted.status === "drifted", drifted.status);
 }
 
 console.log("");
