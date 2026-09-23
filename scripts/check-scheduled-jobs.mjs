@@ -209,8 +209,59 @@ for (const f of yamls) {
   }
 }
 
+// ---- 6. a scheduled step may not decide anything from `inputs` -----------
+//
+// `inputs` exist only on a workflow_dispatch. On a schedule event every one of
+// them is the EMPTY STRING -- not the `default:` declared beside it, which
+// applies to a dispatch and nowhere else.
+//
+// crawl-inventory.yml had the same absence read by two authors in two
+// languages, and they disagreed:
+//
+//     run:   if [ "${{ inputs.dry_run }}" != "false" ]   ->  "" != "false"  -> DRY RUN
+//     if:    ${{ !inputs.dry_run }}                      ->  !""            -> NOT a dry run
+//
+// So from the night the cron was cleared (2026-09-22) the standing Alberta
+// crawl fetched every dealer feed, wrote nothing, and then ran both steps
+// documented as "never runs on a dry-run". One of them writes: it published a
+// fresh city index built on the previous crawl's listings on a day nothing had
+// been read. Nothing was red until a THIRD guard -- a script that counts rows
+// in the database rather than trusting the job -- refused and exited 1.
+//
+// This is not the first time. Commit 6f3609b is titled "fix: rebuild-index step
+// condition never ran (bool/string mismatch)" and repaired the same step.
+//
+// THE RULE IS ABSENCE, NOT POLARITY. It would be enough to ban the negations --
+// !inputs.X, inputs.X != true -- because those are the ones an empty string
+// sends down the permissive branch. Banning every `inputs.` in an `if:` is
+// stricter and simpler, and it costs nothing here: after the fix no workflow in
+// this repo does it. A scheduled step decides from github.event_name, or from a
+// step output written by the step that actually did the work.
+//
+// SCOPE: `if:` conditions only, in workflows with a LIVE schedule. It does not
+// police `${{ inputs.X }}` inside a run: block -- shell sees the same empty
+// string, but shell has to say what it does with it, so the two halves cannot
+// silently disagree the way a YAML truthiness rule can.
+for (const f of yamls) {
+  const rel = relative(".", f).replace(/\\/g, "/");
+  if (!rel.startsWith(LIVE_DIR + "/")) continue;
+  const lines = readFileSync(f, "utf8").split(/\r?\n/);
+  // A LIVE schedule: block, not one commented out pending a sign-off.
+  if (!lines.some((l) => /^\s*schedule:\s*$/.test(l))) continue;
+  lines.forEach((line, i) => {
+    if (!/^\s*if:/.test(line)) return;
+    if (!/(?:github\.event\.)?inputs\./.test(line)) return;
+    problems.push(
+      `${rel}:${i + 1}\n      A step condition in a SCHEDULED workflow decides from an input.\n` +
+      `      ${line.trim()}\n` +
+      `      On a schedule there are no inputs, so this reads the empty string -- and the\n` +
+      `      default: declared beside the input does not apply. Gate on github.event_name,\n` +
+      `      or on a step output written by the step that did the work.`);
+  });
+}
+
 if (!problems.length) {
-  console.log(`✅ scheduled-jobs: every workflow is in ${LIVE_DIR}/, every third-party fetch identifies itself, and every Supabase job runs Node ${NODE_FLOOR}+, no job gates itself on the clock, and every workflow parses.`);
+  console.log(`✅ scheduled-jobs: every workflow is in ${LIVE_DIR}/, every third-party fetch identifies itself, and every Supabase job runs Node ${NODE_FLOOR}+, no job gates itself on the clock or on an input a schedule does not supply, and every workflow parses.`);
   process.exit(0);
 }
 console.error(`❌ scheduled-jobs: ${problems.length} job(s) cannot reliably do their work.\n`);

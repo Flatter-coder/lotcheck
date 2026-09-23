@@ -77,18 +77,50 @@ jobs:
           node-version: "24"      # --experimental-strip-types: the crawler imports validateVin from the edge functions' shared module
       - name: Install
         run: npm install --no-audit --no-fund @supabase/supabase-js
+      # ONE AUTHOR FOR "IS THIS A DRY RUN", AND IT IS NOT inputs.
+      #
+      # inputs.dry_run only exists on a workflow_dispatch. On a schedule event it
+      # is the EMPTY STRING, and its two readers disagreed about what that meant:
+      # this bash read  "" != "false"  as a dry run, while the write steps below
+      # read  !inputs.dry_run  --  !""  --  as NOT a dry run, and ran. So from the
+      # day the cron was cleared (2026-09-22) the standing crawl fetched every
+      # feed, wrote nothing, and then ran both steps documented as running only
+      # after a real crawl. One of them writes.
+      #
+      # github.event_name is present on every trigger, so it is read first. A
+      # schedule IS the standing crawl and writes; a dispatch stays dry unless
+      # someone says otherwise. inputs travel via env: instead of being pasted
+      # into the shell, so a dispatched value can never become a command.
       - name: Crawl
+        id: crawl
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EVENT: ${{ github.event_name }}
+          DRY_INPUT: ${{ inputs.dry_run }}
+          HOST_INPUT: ${{ inputs.host }}
         run: |
           ARGS=""
-          if [ "${{ inputs.dry_run }}" != "false" ]; then ARGS="$ARGS --dry-run"; fi
-          if [ -n "${{ inputs.host }}" ]; then ARGS="$ARGS --host ${{ inputs.host }}"; fi
+          if [ "$EVENT" = "schedule" ]; then
+            DRY=false
+            echo "schedule run - the standing crawl writes (cleared 2026-09-22, see header)"
+          elif [ "$DRY_INPUT" = "false" ]; then
+            DRY=false
+            echo "dispatch with dry_run=false - writing"
+          else
+            DRY=true
+            ARGS="$ARGS --dry-run"
+            echo "dispatch - dry run (dry_run=${DRY_INPUT:-unset})"
+          fi
+          echo "dry=$DRY" >> "$GITHUB_OUTPUT"
+          if [ -n "$HOST_INPUT" ]; then ARGS="$ARGS --host $HOST_INPUT"; fi
           echo "node scripts/crawl-alberta-inventory.mjs $ARGS"
           node --experimental-strip-types scripts/crawl-alberta-inventory.mjs $ARGS
+      # Gated on what the crawl DID, not on what the operator asked for.
+      # steps.crawl.outputs.wrote is written by the crawler itself, and is true
+      # only when fn_upsert_listings accepted at least one observation row.
       - name: Rebuild city price index
-        if: ${{ !inputs.dry_run }}
+        if: ${{ steps.crawl.outputs.wrote == 'true' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -97,10 +129,24 @@ jobs:
       # listing_observation rows this crawl just wrote -- a database fact, not
       # a re-parse of this job's own log -- and applies its own plausibility
       # cap independently of any upstream fix. Same guard as the step above:
-      # never runs on a dry-run, so a report day is never backed by zero reads.
+      # gated on rows actually accepted, so a report day is never backed by
+      # zero reads -- and never skipped on a day we really did read.
       - name: Build Alberta daily inventory report
-        if: ${{ !inputs.dry_run }}
+        if: ${{ steps.crawl.outputs.wrote == 'true' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/build-alberta-inventory-daily.mjs
+
+      # A SKIP IS NOT A PASS.
+      #
+      # The two steps above are gated on a fact now, which means a run that meant
+      # to write and wrote nothing would skip them both and finish GREEN -- a
+      # silent no-op, which is the shape this repo keeps rediscovering. A dry run
+      # is allowed to write nothing. A schedule is not: if the standing crawl
+      # reached no dealer, the job did not happen and the run has to say so.
+      - name: Guard - a run that meant to write must have written
+        if: ${{ always() && steps.crawl.outputs.dry == 'false' && steps.crawl.outputs.wrote != 'true' }}
+        run: |
+          echo "::error title=Crawl wrote nothing::Not a dry run, and fn_upsert_listings accepted 0 observation rows. The city index and the public daily count were both skipped. Read the Crawl step for the per-dealer reason."
+          exit 1
