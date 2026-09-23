@@ -316,6 +316,104 @@ available and is still returned, as `starting_at`.
 the first run: one had no covering case — which is how the third defect above
 was found — and one silently failed to modify the file and was reported
 `NOT APPLIED` rather than as a catch.
+### The other fourteen, judged one at a time
+
+**Shape:** A guard that cannot fail · Two authors per fact
+
+The separate work, done. Each of the 15 suites was judged on whether it reaches
+production by ANY route, and the judgement was then **proven by mutation** —
+break the production artifact the suite claims to guard, expect red. Reading
+them was not treated as evidence; the replica above had a comment asserting it
+mirrored production, and that comment was false.
+
+Eleven reach production by a route that is not an import, and all eleven caught
+the mutation:
+
+| suite | how it reaches production | mutation that turned it red |
+|---|---|---|
+| `test-province` | scans `scripts/` + `scripts/lib/` source | a scraper set back to `"ON"` |
+| `test-inventory-counts` | reads the migration SQL | `security definer` → `security invoker` |
+| `test-no-raw-msrp-delta` | bans a subtraction in named surfaces | a raw `asking - msrp` added to `report-bands.js` |
+| `test-icons3d` | reads `icons3d.jsx`, App.jsx, `public/` | an icon pointed at a gradient id that does not exist |
+| `test-price-index` | reads the shipped `live-price-index.html` | `order=msrp.asc` dropped from the paginated read |
+| `test-recall-single-source` | structural: one declaration, every consumer imports | the TC candidate ladder emptied |
+| `test-pg-timestamp` | **lifts and runs** `pgTimestamp` from App.jsx | the clamp removed |
+| `test-share-round-trip` | **lifts and runs** `encodeReport`/`decodeReport` | the recall confirmation flag dropped |
+| `test-migration-assert` | **lifts and runs** `assertionsIn`/`runAssertion` | `failed++` removed from the `if (bad)` block |
+| `test-migration-blame` | **lifts and runs** `blameMissingRelation` | the helper neutered |
+| `test-migration-destructive` | **lifts and runs** `destructiveStatements` | the refusal's `continue` removed, so it warns and proceeds |
+
+`test-delivery-guarantees` needed no judgement: it already IS a mutation test,
+spawning `check-delivery-guarantees.mjs` against mutated copies of the real
+source, with a control and a "the mutation matched nothing" guard. Weakening the
+gate's PDF size-floor comparison turned it red.
+
+**The *Not generalised, deliberately* note above is wrong about one thing, and
+it matters.** It says the migration suites "spawn `apply-migrations.mjs` as a
+subprocess". They do not —
+there is no `execFileSync` in any of them. They brace-match the function out of
+the source and evaluate it. The conclusion held, the stated mechanism did not,
+and a file whose purpose is to stop the next instance cannot afford to describe
+a route that does not exist.
+
+### Two replicas, and a check a comment could satisfy
+
+`test-vision-tiling` was the **only suite in `scripts/` that touched no
+production file at all** — no `readFileSync`, no `import`, nothing. It declared
+its own five constants and its own `plan()`, under a comment reading *"Mirrors
+normalizeImageForVision's geometry exactly"*. Deleting the real tiling left it
+green, exactly as deleting `gateMsrpRows` left `test:catalog-quality` green.
+
+The geometry could not be imported — it sat inside a React component, tangled
+with a canvas and a decoded bitmap — so it was split out: `planVisionTiles()` at
+module scope, pure arithmetic over two numbers, called by
+`normalizeImageForVision`. The suite lifts and runs **that** function, the same
+route `test-pg-timestamp` already took into the same file. The geometry lines
+moved **verbatim**, and a sweep of 20,224 image sizes against the pre-change
+source found no change to any output size, tile count or source rectangle.
+
+11 of 11 behaviour-changing mutations caught, including `planVisionTiles`
+deleted outright and the uploader unwired from it; a comment reword left it
+green, so it pins the rule and not the prose. 22 checks became 30.
+
+`test-reputation-budget` read its two constants from the source — and then
+re-implemented the line that uses them:
+
+    const budget = (elapsed) => Math.min(TIMEOUT, SKIP_AFTER - elapsed);
+
+commented *"Mirrors the source line exactly"*. Drop the `- elapsed` in
+production and all four checks below it still passed. The expression is now
+lifted from the source and evaluated, the worst case is **measured** by running
+it across the range of elapsed times rather than restated as `SKIP_AFTER +
+TIMEOUT`, and a budget that stops shrinking fails a monotonicity check that no
+fixed point can satisfy. 9 of 9 mutations caught, plus 2 on the caller.
+
+`test-catalog-writes` is not a replica — it reads the real stacks — but one
+check asked `src.includes("writeCatalogs")`, and **both stacks name the helper
+in their explanatory comments**. Removing the import *and* renaming the call
+still printed *"tci-stack imports writeCatalogs ✅"*. Presence checks now run on
+comment-stripped source (quote-aware: a `//` inside a URL is not a comment) and
+require the import **and** a call, since either alone is satisfiable while the
+writes are hand-rolled. The one check that is genuinely about a comment — the
+`74681.92` province evidence — keeps the raw text. 12 checks became 14.
+
+**Four mutations "survived" on the first pass and three of them were my fault,
+not the gates'.** A non-global `replace` hit the wrong one of several
+occurrences, so the mutation was only partly applied — `failed++` in an
+unrelated branch, a `continue` in the dry-run block, one of two candidate
+loops. Re-targeted, all three turned red. That is why the harness reports **NOT
+APPLIED** as its own outcome: a mutation that never landed must never be
+counted as one the gate caught. One case was correctly reported NOT APPLIED
+(`74681.92` lives in `tci-msrp.mjs`, not `tci-stack.mjs`) and turned red once
+aimed at the right file. Only the fourth was a real hole, and it is the one
+fixed above.
+
+**Still not generalised.** A blanket "every suite must import production" gate
+remains the wrong instrument, for the reason given above: 13 of these 15 are
+sound, so the gate would need a 13-entry allowlist written to make it pass.
+The instrument that worked here was mutation, one suite at a time.
+
+
 
 ### Landed
 
@@ -336,6 +434,7 @@ was found — and one silently failed to modify the file and was reported
 | `127363d` | `test:catalog-quality` tests the production rule instead of its own copy of it (PR #522) |
 | `85bf311` | the gate that tested its own copy of the rule, logged (PR #523) |
 | `36b048b` | drivetrain is corroboration, never identification (PR #524) |
+| `63d47da` | the tiling geometry, the highlights budget and the write-helper check stop asking a copy |
 
 Migrations `20260810` + `20260922f` applied, all 8 post-conditions held against
 the live database. Catalogue verified intact at 1,512 rows throughout. Edge

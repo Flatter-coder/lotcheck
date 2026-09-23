@@ -15,6 +15,15 @@
 //
 // This gate has no network and no API keys. It pins the BUDGET ARITHMETIC and
 // the structural guarantees in the source, which is what the fix actually is.
+//
+// 2026-09-22: it used to pin that arithmetic with its OWN copy of it --
+//   const budget = (elapsed) => Math.min(TIMEOUT, SKIP_AFTER - elapsed);
+// under a comment reading "Mirrors the source line exactly". Nothing compared
+// the two. Drop the "- elapsed" in production, or swap the min for a max, and
+// the four checks below still passed, because they were asking the copy. The
+// expression is now LIFTED FROM THE SOURCE and evaluated, so they ask the line
+// that ships. Same defect as test:catalog-quality, same day --
+// docs/FIXING-HISTORY.md.
 import { readFileSync } from "node:fs";
 
 let passed = 0, failed = 0;
@@ -44,12 +53,52 @@ check("the skip threshold exists", SKIP_AFTER > 0, String(SKIP_AFTER));
 check("the highlights timeout exists", TIMEOUT > 0, String(TIMEOUT));
 check("the caller's abort is known", callerTimeout > 0, String(callerTimeout));
 
+// THE REAL EXPRESSION, lifted from the source and evaluated. A miss here is
+// fatal, never skipped: "the line moved" must not read as "the budget is fine".
+const EXPR = /const highlightsBudget = ([^;]+);/.exec(SRC);
+if (!EXPR) {
+  console.error("FAIL: get-dealer-sentiment no longer declares highlightsBudget as a single\n" +
+    "  expression. This gate evaluates THAT line -- restating the arithmetic here\n" +
+    "  is what it used to do, and it meant production could compute anything.");
+  process.exit(1);
+}
+const budgetFn = new Function("elapsed", "HIGHLIGHTS_TIMEOUT_MS", "HIGHLIGHTS_SKIP_AFTER_MS",
+  `return ${EXPR[1]};`);
+const budget = (elapsed) => budgetFn(elapsed, TIMEOUT, SKIP_AFTER);
+
+// The expression must be self-contained: the two constants and elapsed, and
+// nothing else. If it grows a call into a helper, or reads something that only
+// exists inside the request handler, it cannot be evaluated here -- and a
+// stack trace is a worse answer than a sentence saying what to do about it.
+try {
+  const probe = budget(0);
+  if (!Number.isFinite(probe)) throw new Error(`evaluated to ${probe}`);
+} catch (e) {
+  console.error(`FAIL: the highlights budget can no longer be evaluated offline -- ${e.message}`);
+  console.error(`  the expression found was: ${EXPR[1].trim().slice(0, 120)}`);
+  console.error("  This gate runs the REAL line rather than a copy of it, so the line has");
+  console.error("  to be a plain expression over HIGHLIGHTS_TIMEOUT_MS, HIGHLIGHTS_SKIP_AFTER_MS");
+  console.error("  and elapsed. If the budget now comes from a helper, export that helper and");
+  console.error("  call it from here. Do NOT restate the arithmetic in this file -- that is");
+  console.error("  exactly what made these checks worthless until 2026-09-22.");
+  process.exit(1);
+}
+
 console.log("\nthe worst case fits inside the caller's abort");
 {
-  // The function can spend at most SKIP_AFTER before hop 3 starts (past that
-  // it does not start at all), and hop 3 itself is capped at TIMEOUT.
-  const worst = SKIP_AFTER + TIMEOUT;
-  check(`worst case ${worst}ms is under the caller's ${callerTimeout}ms abort`,
+  // Derived by RUNNING the lifted expression across the range of elapsed
+  // times, not by restating what it ought to come to. Hop 3 only starts when
+  // the budget clears 1s (the skip condition below), so the worst case is the
+  // largest elapsed+budget among the starts that actually happen.
+  let worst = 0, at = 0;
+  for (let elapsed = 0; elapsed <= callerTimeout; elapsed += 5) {
+    const b = budget(elapsed);
+    if (b < 1000) continue;                 // hop 3 is skipped; nothing is spent
+    if (elapsed + b > worst) { worst = elapsed + b; at = elapsed; }
+  }
+  check("hop 3 is reachable at all", worst > 0,
+    "no elapsed value clears the 1s floor -- highlights could never run");
+  check(`measured worst case ${worst}ms (at ${at}ms elapsed) is under the caller's ${callerTimeout}ms abort`,
     worst < callerTimeout,
     "if this fails the buyer gets NOT CHECKED again — the whole point of the fix");
   // "Not over" is not enough: the response, its JSON and the cache write all
@@ -58,13 +107,16 @@ console.log("\nthe worst case fits inside the caller's abort");
   check(`and leaves real headroom for the response and the cache write (${callerTimeout - worst}ms)`,
     callerTimeout - worst >= 1500,
     "an exact fit is not a fit");
+  // The declared ceiling, independent of the expression's shape: even if the
+  // budget stopped shrinking with elapsed altogether, the two constants must
+  // still be chosen so the pair cannot outrun the caller.
+  check(`the declared constants alone (${SKIP_AFTER}+${TIMEOUT}) stay inside the abort`,
+    SKIP_AFTER + TIMEOUT < callerTimeout,
+    "the constants must be safe on their own, not only via the subtraction");
 }
 
 console.log("\nthe budget shrinks as the earlier hops spend it");
 {
-  // Mirrors the source line exactly:
-  //   const highlightsBudget = Math.min(TIMEOUT, SKIP_AFTER - elapsed);
-  const budget = (elapsed) => Math.min(TIMEOUT, SKIP_AFTER - elapsed);
   check("a fast cold start leaves the full highlight budget",
     budget(500) === TIMEOUT, String(budget(500)));
   check("a slow pair of Places calls shrinks it",
@@ -74,6 +126,15 @@ console.log("\nthe budget shrinks as the earlier hops spend it");
   check("the skip fires below 1s of remaining budget, not at zero",
     budget(SKIP_AFTER - 500) < 1000,
     "starting a call we cannot finish only guarantees the caller aborts");
+  // The property behind all four: time already spent can never buy MORE
+  // budget. A formula that ignores elapsed satisfies whichever fixed points
+  // above happen to land on TIMEOUT; it cannot satisfy this.
+  let monotonic = true;
+  for (let e = 0; e < SKIP_AFTER + 2000; e += 25) if (budget(e + 25) > budget(e)) monotonic = false;
+  check("the budget never grows as elapsed time grows", monotonic,
+    "spending time must cost budget -- otherwise the abort is bounded by nothing");
+  check("the budget is never more than hop 3's own ceiling",
+    budget(0) <= TIMEOUT && budget(-5000) <= TIMEOUT, String(budget(-5000)));
 }
 
 console.log("\nthe structure: an optional hop cannot take down the required one");
