@@ -403,7 +403,35 @@ export async function writeCatalogs(make, { msrpRows = [], financeRows = [], lea
   if (opts.priceBasis) msrpRows = msrpRows.map(r => ({ price_basis: opts.priceBasis, ...r }));
   msrpRows = dedupeBy(msrpRows, r => `${r.year}|${r.make}|${r.model}|${r.trim ?? ""}`, "msrp");
   financeRows = dedupeBy(financeRows, r => `${r.make}|${r.model}|${r.term_months}`, "apr");
+  // AN ABSENT CREDENTIAL IS NOT A REQUEST FOR A DRY RUN.
+  //
+  // This branch exists for the local dev loop: run a scraper with no secrets
+  // and read the rows it would have written. That is useful, and it stays.
+  //
+  // What it must never do is answer for a CI job that meant to write. On
+  // 2026-09-23 the "Capture archived Toyota MSRP" step in archived-msrp.yml was
+  // found carrying no env: block at all -- the Hyundai step directly below it
+  // gets all three secrets -- so the step would parse Toyota's newsroom, print a
+  // plausible row count, dump the result to a file on a runner about to be
+  // destroyed, and exit 0. Green, monthly, forever, having written nothing.
+  //
+  // That workflow exists BECAUSE scrape-archived-toyota "merged on 2026-09-03,
+  // passed its tests, and could never run". It shipped built-but-unwired in the
+  // file written to stop built-but-unwired. [[repeat-fix-pattern]]
+  //
+  // So under GitHub Actions the absence is a bug, not a mode, and it is loud.
+  // A caller that genuinely means "exercise this without writing" says so with
+  // allowNoWrite, and one place does: the price-basis suite, which calls this
+  // function to prove the basis rule is enforced rather than merely spelled.
   if (!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)) {
+    if (process.env.GITHUB_ACTIONS === "true" && !opts.allowNoWrite) {
+      throw new Error(
+        `writeCatalogs(${make}): running under GitHub Actions with no SUPABASE_URL / ` +
+        `SUPABASE_SERVICE_ROLE_KEY. This would have dumped ${msrpRows.length} MSRP / ` +
+        `${financeRows.length} finance / ${leaseRows.length} lease row(s) to a file on a ` +
+        `runner that is about to be destroyed, and exited 0. Add the secrets to this ` +
+        `step's env: block, or pass allowNoWrite if the caller really means not to write.`);
+    }
     const outDir = join(__dirname, "..", "out"); mkdirSync(outDir, { recursive: true });
     const file = join(outDir, `${make.toLowerCase()}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
     writeFileSync(file, JSON.stringify({ msrp_catalog: msrpRows, finance_rate_catalog: financeRows, lease_rate_catalog: leaseRows }, null, 2));

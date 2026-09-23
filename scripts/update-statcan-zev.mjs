@@ -12,6 +12,7 @@
 
 import { writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 const PRODUCT_ID = 20100086;
 const OUTPUT_PATH = "public/data/statcan-zev.json";
@@ -91,7 +92,7 @@ async function downloadAndParseCsv() {
   return csvText;
 }
 
-function parseLatestYearZevShare(csvText) {
+export function parseLatestYearZevShare(csvText) {
   // StatCan's CSV export starts with a UTF-8 BOM, which corrupts the first
   // header name ("REF_DATE" becomes "\uFEFFREF_DATE") if not stripped.
   const clean = csvText.replace(/^\uFEFF/, "");
@@ -160,6 +161,69 @@ function parseCsvLine(line) {
   return out;
 }
 
+
+// WHAT STOPS A COLLAPSE REACHING THE MAP.
+//
+// parseLatestYearZevShare indexes the CSV by literal header names (REF_DATE,
+// GEO, "Vehicle type", Sales, "Fuel type", VALUE) and filters on exact label
+// text ("Total, new motor vehicles", "Units", "All fuel types",
+// "Zero-emission") plus the ten spellings in PROVINCE_ID_MAP. Every one of
+// those is StatCan's to rename, and a rename does not throw -- it filters
+// every row out. latestYear stays 0 and result stays {}.
+//
+// main() then wrote that, and the workflow pushed it to main with
+// contents: write. public/data/statcan-zev.json is what statcan-zev-map.html
+// renders, so an upstream header change would have blanked a public map and
+// stamped it year "0", with nothing red anywhere.
+//
+// [[catalog-refresh-can-empty-the-catalog]] is the same rule for the MSRP
+// catalogue: a refresh is allowed to change the numbers, never to empty them.
+// A refusal here writes NOTHING -- not even last_checked_at, because that
+// field is a claim that we confirmed something, and on this path we did not.
+const EXPECTED_REGIONS = Object.keys(PROVINCE_ID_MAP).length;
+const SOURCE_CREDIT =
+  "Statistics Canada. Table 20-10-0086-01, New motor vehicle sales, by vehicle type, annual. Statistics Canada Open Licence.";
+
+export function collapseProblems({ year, data }, previous) {
+  const problems = [];
+  const got = Object.keys(data || {}).length;
+  const had = previous && previous.data ? Object.keys(previous.data).length : 0;
+
+  if (!Number(year)) problems.push({ code: "no_year", why: `no model year parsed (year=${JSON.stringify(year)}) -- REF_DATE is probably renamed or empty` });
+  if (got === 0) problems.push({ code: "no_regions", why: `zero regions parsed out of ${EXPECTED_REGIONS} expected -- a header or a label has almost certainly changed` });
+  else if (got * 2 < EXPECTED_REGIONS) problems.push({ code: "too_few_regions", why: `only ${got} of ${EXPECTED_REGIONS} expected regions parsed` });
+
+  if (had && got * 2 < had) problems.push({ code: "collapsed", why: `regions collapsed from ${had} to ${got} against the file we already hold` });
+  if (previous && previous.year && Number(year) < Number(previous.year)) {
+    problems.push({ code: "year_backwards", why: `model year went BACKWARDS: we hold ${previous.year}, this parse says ${year}` });
+  }
+  return problems;
+}
+
+// THE FLOOR LIVES WITH THE PAYLOAD, NOT BESIDE IT.
+//
+// While proving this guard by mutation, one mutation removed the
+// collapseProblems() call from main() and the suite stayed green -- because
+// the suite tested the checker and main() was free not to ask it. A guard
+// that the writer can decline to consult is a guard with an off switch.
+// So the only way to build the payload runs the floor first, and the mutation
+// that skips it no longer type-checks as a thing you can write.
+export function buildRefreshedPayload(parsed, previous, { releaseTime, nowIso }) {
+  const problems = collapseProblems(parsed, previous);
+  if (problems.length) {
+    const err = new Error("statcan-zev: refusing to write a collapsed refresh");
+    err.problems = problems;
+    throw err;
+  }
+  return {
+    source: SOURCE_CREDIT,
+    year: parsed.year,
+    data_release_time: releaseTime,
+    last_checked_at: nowIso,
+    data: parsed.data,
+  };
+}
+
 async function main() {
   const nowIso = new Date().toISOString();
   const releaseTime = await getReleaseTime();
@@ -179,14 +243,21 @@ async function main() {
   if (releaseChanged) {
     console.log(`New StatCan release detected (${releaseTime}) — re-downloading full table.`);
     const csvText = await downloadAndParseCsv();
-    const { year, data } = parseLatestYearZevShare(csvText);
-    payload = {
-      source: "Statistics Canada. Table 20-10-0086-01, New motor vehicle sales, by vehicle type, annual. Statistics Canada Open Licence.",
-      year,
-      data_release_time: releaseTime,
-      last_checked_at: nowIso,
-      data,
-    };
+    const parsed = parseLatestYearZevShare(csvText);
+    try {
+      payload = buildRefreshedPayload(parsed, previous, { releaseTime, nowIso });
+    } catch (err) {
+      if (!err.problems) throw err;
+      console.error(`Refusing to write ${OUTPUT_PATH}. StatCan published a new release and this run could not read it:`);
+      for (const pr of err.problems) console.error(`  - [${pr.code}] ${pr.why}`);
+      console.error("");
+      console.error("The file on disk is LEFT AS IT WAS -- including last_checked_at, which is a");
+      console.error("claim that we confirmed something, and on this path we did not. Stale is");
+      console.error("recoverable; a blank public map stamped with a fresh-looking date is not.");
+      console.error("Check whether StatCan renamed a column or a label in table 20-10-0086-01,");
+      console.error("then fix the literals in parseLatestYearZevShare and PROVINCE_ID_MAP.");
+      process.exit(1);
+    }
   } else {
     console.log(`No new StatCan release (still ${releaseTime}) — just updating last_checked_at.`);
     payload = { ...previous, last_checked_at: nowIso };
@@ -197,7 +268,14 @@ async function main() {
   console.log(`Wrote ${OUTPUT_PATH}`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Run only when invoked directly. Until 2026-09-23 main() ran at module load,
+// so importing this file to test its parser would have downloaded a 60MB zip
+// from StatCan and rewritten public/data/statcan-zev.json as a side effect of
+// the import. An untestable guard is a guard nobody checks. Same shape as
+// crawl-alberta-inventory.mjs. argv[1] is absent under `node -e`, so guard it.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
