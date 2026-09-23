@@ -141,8 +141,76 @@ for (const f of yamls) {
     `      Dedupe on a date or a marker, or let both DST cron lines run.`);
 }
 
+// ---- 5. a workflow GitHub refuses to START --------------------------------
+//
+// Section 1 catches a workflow GitHub never sees. This is the same silence from
+// the other side: the file is in the right place, GitHub reads it, and rejects
+// it. The run that appears has ZERO jobs and is named by its path instead of
+// its `name:` -- and, the part that costs you, the pull request shows no
+// failing check at all. A check that never started is not a check that failed.
+//
+// Measured 2026-09-22 on PR #520. A step written
+//
+//     - name: "Could not tell" never renders as "not an all-in province"
+//
+// closes its quoted scalar after `tell` and leaves the rest as trailing junk.
+// Gates never ran. The PR reported mergeStateStatus CLEAN carrying one Vercel
+// comment check, and the waiter watching it read "nothing pending" as green --
+// so the fix that PR was FOR got its own verification silently removed.
+//
+// SCOPE, stated so nobody reads more into a pass than is here: this catches the
+// shape that broke -- a value that opens with a quote and does not close
+// cleanly -- not every way YAML can be invalid, and it cannot check the file it
+// is declared in, because a gates.yml GitHub will not start cannot run its own
+// gate. The durable half of this guard is not a gate at all: a required check
+// that is ABSENT must never be read as a check that passed.
+function unclosedQuote(value) {
+  const q = value[0];
+  if (q !== '"' && q !== "'") return false;
+  let j = 1;
+  while (j < value.length) {
+    const c = value[j];
+    if (q === '"' && c === "\\") { j += 2; continue; }   // \" inside double quotes
+    if (c === q) {
+      if (q === "'" && value[j + 1] === "'") { j += 2; continue; } // '' escapes '
+      const rest = value.slice(j + 1);
+      // nothing after the closing quote, or only a comment, is well-formed
+      return !(rest.trim() === "" || /^\s+#/.test(rest));
+    }
+    j++;
+  }
+  return true;                                           // never closed at all
+}
+for (const f of yamls) {
+  const rel = relative(".", f).replace(/\\/g, "/");
+  if (!rel.startsWith(LIVE_DIR + "/")) continue;
+  const lines = readFileSync(f, "utf8").split(/\r?\n/);
+  let blockIndent = -1;                 // inside a `|` / `>` body: shell, not YAML
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const indent = line.search(/\S/);
+    if (indent < 0) continue;                              // blank
+    if (blockIndent >= 0) {
+      if (indent > blockIndent) continue;                  // still in the body
+      blockIndent = -1;
+    }
+    if (line[indent] === "#") continue;                    // comment
+    const m = /^\s*(?:-\s+)?([A-Za-z_][\w.-]*)\s*:(?:\s+(.*))?$/.exec(line);
+    if (!m) continue;
+    const value = (m[2] || "").trim();
+    if (!value) continue;
+    if (/^[|>][-+]?\d*$/.test(value)) { blockIndent = indent; continue; }
+    if (!unclosedQuote(value)) continue;
+    problems.push(
+      `${rel}:${i + 1}\n      ${m[1]}: opens a quoted value that does not close cleanly, so GitHub ` +
+      `cannot parse\n      this workflow and will not start it. The run carries no jobs and the pull ` +
+      `request\n      shows no failing check -- it shows no check.\n      ${line.trim()}\n` +
+      `      Wrap the whole value: name: '"like this" with inner quotes'`);
+  }
+}
+
 if (!problems.length) {
-  console.log(`✅ scheduled-jobs: every workflow is in ${LIVE_DIR}/, every third-party fetch identifies itself, and every Supabase job runs Node ${NODE_FLOOR}+, and no job gates itself on the clock.`);
+  console.log(`✅ scheduled-jobs: every workflow is in ${LIVE_DIR}/, every third-party fetch identifies itself, and every Supabase job runs Node ${NODE_FLOOR}+, no job gates itself on the clock, and every workflow parses.`);
   process.exit(0);
 }
 console.error(`❌ scheduled-jobs: ${problems.length} job(s) cannot reliably do their work.\n`);

@@ -547,7 +547,7 @@ jobs:
       # and subtracts against. That is the Charlesglen defect ($11,173 printed
       # against a real $8,095 gap), whose fix landed on analyze-listing-url only.
       # One shared resolver now, so the two cannot drift again.
-      - name: "Could not tell" never renders as "not an all-in province"
+      - name: '"Could not tell" never renders as "not an all-in province"'
         run: npm run test:quote-basis-unknown
       # 20260916a was applied on 2026-09-16 and reported success. Three of its
       # seven statements matched ZERO rows, because they addressed rows by
