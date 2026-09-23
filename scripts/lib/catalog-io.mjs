@@ -170,7 +170,7 @@ export function assessCollapse(prevCount, nextCount, { floor = COLLAPSE_FLOOR, d
 //
 // The source_url protection belongs on the DELETE, which still has it. A read
 // is not destructive and must see everything.
-async function readExisting(table, make, headers, url) {
+export async function readExisting(table, make, headers, url) {
   const q = `${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(make)}&select=*&limit=5000`;
   const res = await fetch(q, { headers });
   if (!res.ok) return { ok: false, rows: [] };
@@ -434,4 +434,41 @@ export async function writeCatalogs(make, { msrpRows = [], financeRows = [], lea
 
 export function parseArgs() {
   return Object.fromEntries(process.argv.slice(2).map(a => { const m = a.match(/^--([^=]+)=(.*)$/); return m ? [m[1], m[2]] : [a.replace(/^--/, ""), true]; }));
+}
+
+/**
+ * What the catalogue ALREADY knows about a make's powertrains, for the guards
+ * that need our own history rather than the incoming batch.
+ *
+ * WHY. flagAllOnePowertrain proved a series-level fuel mis-tag by looking for a
+ * powertrain-marked sibling nameplate — in the SAME scrape batch. On 2026-09-22
+ * Toyota's feed returned "4Runner" without "4Runner Hybrid" (the hybrid rows
+ * survive only as carry-forward, which the guard cannot see), so the proof
+ * evaporated, the refusal degraded to a warning, and four gas trims went in
+ * tagged Hybrid — including an SR5 at $55,520, the identical price the same
+ * catalogue had stored as Gas five weeks earlier.
+ *
+ * A guard whose evidence is whatever the source happened to send this morning
+ * is a guard the source can switch off.
+ *
+ * Returns { nameplates, fuels } — `make|year|model` (model lower-cased) for the
+ * sibling proof, and `make|model|year` -> Set(fuel_type) for the flip proof.
+ * On a failed read it returns empty collections, which makes both proofs fall
+ * back to batch-only behaviour rather than refusing everything.
+ */
+export async function readPowertrainHistory(make) {
+  const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const empty = { nameplates: [], fuels: new Map() };
+  if (!url || !key) return empty;
+  const headers = { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
+  const { ok, rows } = await readExisting("msrp_catalog", make, headers, url);
+  if (!ok) return empty;
+  const nameplates = new Set(), fuels = new Map();
+  for (const r of rows) {
+    nameplates.add(`${r.make}|${r.year}|${String(r.model || "").toLowerCase()}`);
+    const k = `${r.make}|${r.model}|${r.year}`;
+    if (!fuels.has(k)) fuels.set(k, new Set());
+    if (r.fuel_type) fuels.get(k).add(r.fuel_type);
+  }
+  return { nameplates: [...nameplates], fuels };
 }
