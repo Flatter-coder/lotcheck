@@ -66,6 +66,8 @@
     "test:msrp-claim": "node --experimental-strip-types supabase/functions/_shared/msrp-claim.test.ts",
     "check:pdf-measure": "node scripts/check-pdf-measure.mjs",
     "check:cache-ver": "node scripts/check-cache-ver.mjs",
+    "check:deploy-verified": "node scripts/check-deploy-verified.mjs",
+    "verify:deployed-cache-ver": "node scripts/verify-deployed-cache-ver.mjs",
     "check:coercion": "node scripts/check-number-coercion.mjs",
     "test:read-num": "node scripts/test-read-num.mjs",
     "test:model-identity": "node --experimental-strip-types supabase/functions/_shared/model-identity.test.ts",

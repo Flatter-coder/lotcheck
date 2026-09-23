@@ -813,6 +813,13 @@ jobs:
       # fixed. Needs full history for the merge-base diff.
       - name: Cache version bumped when analysis output changed
         run: npm run check:cache-ver
+      # And a bump that never reaches the running function is the same silence
+      # with a green check over it. The deploy workflow reported success on the
+      # CLI's exit code and never read back which bundle the gateway serves;
+      # this pins the readback that now does -- wired, ordered after the deploy,
+      # unable to swallow its own failure, and exercised on all four outcomes.
+      - name: The deploy reads back what it shipped, and fails on a mismatch
+        run: npm run check:deploy-verified
       # A MISSING NUMBER IS NOT ZERO. Number(null) is 0, and 0 is a legal
       # odometer reading, interest rate and review count — so for those fields
       # "we read zero" and "we read nothing" become the same value and every
