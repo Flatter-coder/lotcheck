@@ -50,6 +50,26 @@ const WORD_NUM = {
 /** Numbers only. "80,000" and "80000" and "80 000" are the same distance. */
 import { NO_DISTANCE_LIMIT_PATTERN } from "../../supabase/functions/_shared/distance-vocab.js";
 
+// Enough to read prose out of a marketing page. Warranty terms live in body
+// copy and tables, never in script or style, so dropping those wholesale
+// removes the JSON blobs that would otherwise supply stray matching numbers.
+//
+// It lives HERE, with the matcher, because it decides what the matcher is
+// ever shown. While it sat privately inside verify-warranty-catalog.mjs,
+// nothing could ask the question that mattered -- "what does the job actually
+// see on mini.ca?" -- without writing a second copy of it, and a second copy
+// is how the answer drifts from the truth. [[two-authors-per-fact]]
+export function htmlToText(html) {
+  return String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&").replace(/&#39;|&rsquo;/g, "'").replace(/&quot;/g, '"')
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ");
+}
+
 export function normalizePage(text) {
   return String(text || "")
     .toLowerCase()
@@ -240,7 +260,23 @@ const FIELDS = ["basic_coverage", "powertrain_coverage", "corrosion_coverage",
 // gap: our source_url does not support every field we cite it for, and the fix
 // is a better URL, not a corrected figure. [[make-it-dispute-proof]]
 const FIELD_SUBJECT = {
-  basic_coverage: /\b(basic|comprehensive|bumper[- ]to[- ]bumper|new vehicle limited|whole vehicle|major component)/i,
+  // THE MAKER NAMES THE PRODUCT, NOT US. This read "new vehicle limited" and
+  // nothing else in that family, so two makes were reported as though our data
+  // were wrong when the figure was on the page all along:
+  //
+  //   MINI:    "our standard 4-year/80,000 km<sup>6</sup> New CAR Limited Warranty"
+  //   Porsche: "Porsche New Vehicle Warranty"  -- no "Limited" in the name
+  //
+  // Both got status `uncited`, whose note reads "this page does not cover
+  // basic_coverage at all ... find a URL that states it". That sends a human to
+  // replace a correct source or delete a correct figure, off the back of our own
+  // vocabulary. A false `uncited` is the same shape as the false `drifted` that
+  // pairOnPage was widened to stop -- our word choice reported as their defect.
+  //
+  // Widening the SUBJECT is the safe half of this matcher: the subject only
+  // decides whether we look. The stored numbers must still appear as an adjacent
+  // pair within 40 characters (pairOnPage) before anything is confirmed.
+  basic_coverage: /\b(basic|comprehensive|bumper[- ]to[- ]bumper|new (?:vehicle|car)(?: limited)? warrant|new vehicle limited|whole vehicle|major component)/i,
   // EV-only makes have no ICE powertrain, so migration 20260802 deliberately
   // stores the BATTERY AND DRIVE UNIT term in powertrain_coverage -- the Tesla
   // row is exactly that. Narrow phrasings only: a bare "battery" matches the

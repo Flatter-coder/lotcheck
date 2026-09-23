@@ -20,7 +20,7 @@
 // Run: npm run test:warranty-verify
 
 import { readFileSync } from "node:fs";
-import { parseTerm, pairOnPage, verifyField, verifyRow, sourceUrlOf, normalizePage }
+import { parseTerm, pairOnPage, verifyField, verifyRow, sourceUrlOf, normalizePage, htmlToText }
   from "./lib/warranty-verify.mjs";
 
 let failed = 0;
@@ -342,6 +342,85 @@ console.log("part 9 -- a term may state YEARS AND NO DISTANCE AT ALL");
   check("a wrong year is not confirmed on that page", pairOnPage({ years: 9, km: "not_stated" }, MINI) === false);
   check("years alone on an unrelated page is not a confirmation",
     pairOnPage({ years: 12, km: "not_stated" }, "the 12 year old car was sold at auction") === false);
+}
+
+
+/* ── the maker names the product, and it is not always our name for it ─── */
+console.log("\npart 12 -- a subject we could not recognise reads as a figure we cannot source");
+{
+  // 2026-09-23. Two makes were reported UNCITED -- "this page does not cover
+  // basic_coverage at all ... find a URL that states it" -- on pages that state
+  // it plainly. FIELD_SUBJECT.basic_coverage matched only "new vehicle limited",
+  // and neither maker calls it that.
+  //
+  // The harm is the note, not the status: it sends a human to replace a correct
+  // source or delete a correct figure, on the strength of our own vocabulary.
+  // Same shape as the false DRIFT that widened pairOnPage -- our word choice
+  // reported as the manufacturer's defect.
+  //
+  // Both strings below are VERBATIM from the live pages, read through the job's
+  // own htmlToText (scripts/probe-warranty-page.mjs), not from a browser view.
+
+  // mini.ca/en/owners/mini-service -- the <sup>6</sup> footnote marker survives
+  // tag-stripping as a bare "6" between the distance and the product name.
+  const MINI_PAGE = "commitment to quality and your satisfaction is exemplified by our standard "
+    + "4-year/80,000 km 6 new car limited warranty and 12-year rust perforation warranty*. "
+    + "throughout your journey, you'll also receive 24-hour mini roadside assistance for "
+    + "4 years/80,000 km, which includes: accident management, towing, lock-out service";
+  const mini = verifyRow({
+    make: "MINI", source_url: "https://mini.ca/en/owners/mini-service",
+    basic_coverage: "4-year/80,000 km",
+  }, MINI_PAGE);
+  check("MINI's \"New CAR Limited Warranty\" is recognised as basic coverage",
+    mini.fields.basic_coverage.state === "confirmed", mini.fields.basic_coverage.state);
+
+  // porsche.com/canada/en/... -- "Porsche New Vehicle Warranty", no "Limited",
+  // and Porsche writes "kms".
+  const PORSCHE_PAGE = "we offer the porsche new vehicle warranty. it is valid worldwide for "
+    + "4 years or up to 80,000 kms* and protects you in the event of manufacturing defects.";
+  const porsche = verifyRow({
+    make: "Porsche", source_url: "https://www.porsche.com/canada/en/x",
+    basic_coverage: "4-year/80,000 km",
+  }, PORSCHE_PAGE);
+  check("Porsche's \"New Vehicle Warranty\" -- no \"Limited\" -- is recognised too",
+    porsche.fields.basic_coverage.state === "confirmed", porsche.fields.basic_coverage.state);
+
+  // AND THE HALF THAT MUST NOT MOVE. Widening the subject decides only whether
+  // we LOOK; the stored numbers still have to appear as an adjacent pair. MINI's
+  // own page carries 2 years/40,000 km and 8 years/160,000 km -- both SERVICE
+  // plans, not warranties -- and a subject widened into a number-grabber would
+  // confirm a maintenance figure as factory cover. That is the wrong-node defect
+  // that printed an Extended Service Agreement ceiling as a Tesla battery term.
+  const MINI_SERVICE = "mini no-charge scheduled maintenance. up to 2 years / 40,000 km for "
+    + "gas-powered or 3 years with unlimited kms for all-electric minis. service inclusive plus "
+    + "services covered gas powered minis up to 8 years / 160,000 km";
+  const wrongNode = verifyRow({
+    make: "MINI", source_url: "https://mini.ca/x",
+    basic_coverage: "4-year/80,000 km",
+    powertrain_coverage: "8-year/160,000 km",
+  }, MINI_SERVICE);
+  check("a maintenance page is NOT read as stating basic cover",
+    wrongNode.fields.basic_coverage.state !== "confirmed", wrongNode.fields.basic_coverage.state);
+  check("...nor is a Service Inclusive plan read as a powertrain warranty",
+    wrongNode.fields.powertrain_coverage.state !== "confirmed", wrongNode.fields.powertrain_coverage.state);
+
+  // A CPO term is not a new-car term. mini.ca publishes a powertrain figure only
+  // on its Certified Pre-Owned product, and that page must never confirm the
+  // new-vehicle row.
+  const stillWrong = verifyRow({
+    make: "Jaguar", source_url: "https://www.jaguar.com/en-ca/x",
+    basic_coverage: "4-year/80,000 km",
+  }, "every new jaguar vehicle is covered by a new vehicle limited warranty for 4 years or 80,000 km");
+  check("the original \"new vehicle limited\" wording still matches", 
+    stillWrong.fields.basic_coverage.state === "confirmed", stillWrong.fields.basic_coverage.state);
+
+  // htmlToText moved into the lib so this file and the runner read one copy.
+  check("htmlToText drops scripts, so a layout JSON blob cannot supply numbers",
+    !/160000/.test(htmlToText('<p>4 years</p><script>{"km":160000}</script>')),
+    htmlToText('<p>4 years</p><script>{"km":160000}</script>'));
+  check("...and keeps the body text either side of a stripped tag apart",
+    /80,000 km\s+6\s+New Car/.test(htmlToText("<span>80,000 km<sup>6</sup> New Car Limited Warranty</span>")),
+    htmlToText("<span>80,000 km<sup>6</sup> New Car Limited Warranty</span>"));
 }
 
 console.log("");
