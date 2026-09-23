@@ -30,7 +30,7 @@ export function inferFuelFromName(name) {
 // is a whole-dollar figure, so a fractional value proves the source handed us a
 // computed price. Reject rather than store; a missing row is recoverable, a
 // wrong MSRP is a wrong claim in a buyer's report.
-function gateMsrpRows(rows, make) {
+export function gateMsrpRows(rows, make) {
   const kept = [], rejected = [];
   for (const r of rows) {
     const v = Number(r?.msrp);
