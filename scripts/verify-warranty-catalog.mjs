@@ -22,7 +22,7 @@
 
 import { politeFetch, requestLedger } from "./lib/polite-fetch.mjs";
 import { pdfText, looksLikePdf } from "./lib/pdf-text.mjs";
-import { verifyRow } from "./lib/warranty-verify.mjs";
+import { verifyRow, htmlToText } from "./lib/warranty-verify.mjs";
 
 const PROJECT_REF = "debigtyjhjamipooajhk";
 const DRY = process.argv.includes("--dry-run");
@@ -47,19 +47,6 @@ async function runSql(sql) {
   return res.json().catch(() => null);
 }
 
-// Enough to read prose out of a marketing page. Warranty terms live in body
-// copy and tables, never in script or style, so dropping those wholesale
-// removes the JSON blobs that would otherwise supply stray matching numbers.
-function htmlToText(html) {
-  return String(html || "")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&").replace(/&#39;|&rsquo;/g, "'").replace(/&quot;/g, '"')
-    .replace(/&nbsp;/g, " ")
-    .replace(/\s+/g, " ");
-}
 
 async function readPage(url) {
   try {
