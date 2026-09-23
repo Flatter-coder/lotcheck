@@ -9758,6 +9758,93 @@ function GaugeDial({id,value,min,max,bands,needleColor,tickCount=5,tickFormat,ma
   );
 }
 
+// ── Vision tiling geometry ──────────────────────────────────────────────────
+// Claude's vision API hard-rejects a single image over ~5MB, and it scales
+// anything past ~1568px on the long edge down before the model ever sees it.
+// We were sending the raw file: the client allowed 15MB and the edge function
+// allowed a 20M-char base64, so every upload in the ~5-15MB band sailed past
+// both guards and came back a 400 from Anthropic, surfacing as the generic
+// "The analysis service returned an error" card (confirmed 2026-08-15 on a
+// PNG screenshot of a Google results page). Sending oversized bytes never
+// bought detail -- it only bought that failure.
+//
+// Tall screenshots are THE primary upload here (screenshot-first directive),
+// and naively fitting a 1920x9000 capture inside 1568 on the long edge would
+// squeeze it to ~334px wide -- every number on it unreadable. So width is
+// what we cap; height is SLICED into overlapping tiles that each stay within
+// budget and each keep full horizontal resolution. Claude reads them as one
+// continuous page (the server labels them top-to-bottom and says so).
+//
+// The geometry lives HERE, at module scope, and not inside the component that
+// draws it. normalizeImageForVision needs a canvas and a decoded bitmap, so a
+// test cannot run it in node -- and test-vision-tiling.mjs therefore carried
+// its own copy of this arithmetic, declared under a comment saying it
+// "mirrors normalizeImageForVision's geometry exactly". It did not have to:
+// nothing compared the two. Deleting the real tiling left that suite green,
+// which is the same shape as the catalogue-quality gate that tested its own
+// copy of the rule (docs/FIXING-HISTORY.md, 2026-09-22). Split out, the
+// geometry is a pure function of two numbers, and the suite runs THIS one.
+export const VISION_MAX_W=1568;        // Anthropic's own downscale target
+export const VISION_MAX_TILE_H=1568;   // keep each tile within the same budget
+export const VISION_TILE_OVERLAP=110;  // px repeated between tiles so a line of text
+                                       // split across a seam is whole in one of them
+export const VISION_MAX_TILES=8;       // hard ceiling on request weight
+// Tiling exists for SCROLLING SCREENSHOTS -- a capture of a whole web page,
+// which is narrow and enormously tall. An ordinary phone photo of a paper
+// quote is ~3:4 and reads fine as one downscaled image; slicing it would
+// double the request weight and cost for the most common upload while
+// helping nothing. So the trigger is the aspect ratio, not raw height.
+export const VISION_TALL_RATIO=2.2;
+
+/**
+ * Where the pixels go, for an image of srcW x srcH. Pure arithmetic: no canvas,
+ * no bitmap, no DOM. Returns the output size and the tile rectangles to draw,
+ * top-to-bottom. A non-tall image yields exactly one tile covering the whole
+ * output, so the caller has a single path to draw.
+ */
+export function planVisionTiles(srcW,srcH){
+  const isTall=srcH/srcW>=VISION_TALL_RATIO;
+  let outW,outH;
+  if(isTall){
+    // Keep full horizontal detail and slice vertically (below).
+    const scale=Math.min(1,VISION_MAX_W/srcW);
+    outW=Math.max(1,Math.round(srcW*scale));
+    outH=Math.max(1,Math.round(srcH*scale));
+  } else {
+    // Ordinary photo/screenshot: one image, fit inside the long-edge cap.
+    const scale=Math.min(1,VISION_MAX_W/Math.max(srcW,srcH));
+    outW=Math.max(1,Math.round(srcW*scale));
+    outH=Math.max(1,Math.round(srcH*scale));
+  }
+
+  // A page so tall it would exceed the tile ceiling gets scaled down the rest
+  // of the way rather than truncated -- a shorter read of the WHOLE page beats
+  // a sharp read of its top third (report-never-empty).
+  const stride=VISION_MAX_TILE_H-VISION_TILE_OVERLAP;
+  if(isTall){
+    const tilesNeeded=outH<=VISION_MAX_TILE_H?1:Math.ceil((outH-VISION_TILE_OVERLAP)/stride);
+    if(tilesNeeded>VISION_MAX_TILES){
+      const maxH=VISION_MAX_TILE_H+stride*(VISION_MAX_TILES-1);
+      const extra=maxH/outH;
+      outW=Math.max(1,Math.round(outW*extra));
+      outH=Math.max(1,Math.round(outH*extra));
+    }
+  }
+
+  const tiles=[];
+  if(!isTall||outH<=VISION_MAX_TILE_H){
+    tiles.push({top:0,h:outH});
+  } else {
+    for(let top=0,n=0;top<outH&&n<VISION_MAX_TILES;top+=stride,n++){
+      const h=Math.min(VISION_MAX_TILE_H,outH-top);
+      if(h<=0) break;
+      tiles.push({top,h});
+      if(top+h>=outH) break;
+    }
+  }
+  return {isTall,outW,outH,tiles};
+}
+
 function QuoteCheckPage(){
   // Alberta-only gate. Hooks must run unconditionally, so this sits at the top
   // and the early return happens after every other hook has been declared.
@@ -10194,33 +10281,10 @@ function QuoteCheckPage(){
   }
 
   // ── Vision normalization ───────────────────────────────────────────────────
-  // Claude's vision API hard-rejects a single image over ~5MB, and it scales
-  // anything past ~1568px on the long edge down before the model ever sees it.
-  // We were sending the raw file: the client allowed 15MB and the edge function
-  // allowed a 20M-char base64, so every upload in the ~5-15MB band sailed past
-  // both guards and came back a 400 from Anthropic, surfacing as the generic
-  // "The analysis service returned an error" card (confirmed 2026-08-15 on a
-  // PNG screenshot of a Google results page). Sending oversized bytes never
-  // bought detail -- it only bought that failure.
-  //
-  // Tall screenshots are THE primary upload here (screenshot-first directive),
-  // and naively fitting a 1920x9000 capture inside 1568 on the long edge would
-  // squeeze it to ~334px wide -- every number on it unreadable. So width is
-  // what we cap; height is SLICED into overlapping tiles that each stay within
-  // budget and each keep full horizontal resolution. Claude reads them as one
-  // continuous page (the server labels them top-to-bottom and says so).
-  const VISION_MAX_W=1568;        // Anthropic's own downscale target
-  const VISION_MAX_TILE_H=1568;   // keep each tile within the same budget
-  const VISION_TILE_OVERLAP=110;  // px repeated between tiles so a line of text
-                                  // split across a seam is whole in one of them
-  const VISION_MAX_TILES=8;       // hard ceiling on request weight
+  // The tiling GEOMETRY is planVisionTiles() at module scope -- see the note
+  // there for why it does not live in here. These two are drawing settings,
+  // used only by the canvas work below.
   const VISION_JPEG_QUALITY=0.92;
-  // Tiling exists for SCROLLING SCREENSHOTS -- a capture of a whole web page,
-  // which is narrow and enormously tall. An ordinary phone photo of a paper
-  // quote is ~3:4 and reads fine as one downscaled image; slicing it would
-  // double the request weight and cost for the most common upload while
-  // helping nothing. So the trigger is the aspect ratio, not raw height.
-  const VISION_TALL_RATIO=2.2;
   // Long edge of the cheap triage frame. Small enough to cost roughly a tenth
   // of a full read, large enough to count distinct vehicle cards on a grid.
   const VISION_TRIAGE_MAX_EDGE=800;
@@ -10269,53 +10333,22 @@ function QuoteCheckPage(){
     const srcW=bmp.width||bmp.naturalWidth, srcH=bmp.height||bmp.naturalHeight;
     if(!srcW||!srcH) throw new Error("no dimensions");
 
-    const isTall=srcH/srcW>=VISION_TALL_RATIO;
-    let outW,outH;
-    if(isTall){
-      // Keep full horizontal detail and slice vertically (below).
-      const scale=Math.min(1,VISION_MAX_W/srcW);
-      outW=Math.max(1,Math.round(srcW*scale));
-      outH=Math.max(1,Math.round(srcH*scale));
-    } else {
-      // Ordinary photo/screenshot: one image, fit inside the long-edge cap.
-      const scale=Math.min(1,VISION_MAX_W/Math.max(srcW,srcH));
-      outW=Math.max(1,Math.round(srcW*scale));
-      outH=Math.max(1,Math.round(srcH*scale));
-    }
-
-    // A page so tall it would exceed the tile ceiling gets scaled down the rest
-    // of the way rather than truncated -- a shorter read of the WHOLE page beats
-    // a sharp read of its top third (report-never-empty).
-    const stride=VISION_MAX_TILE_H-VISION_TILE_OVERLAP;
-    if(isTall){
-      const tilesNeeded=outH<=VISION_MAX_TILE_H?1:Math.ceil((outH-VISION_TILE_OVERLAP)/stride);
-      if(tilesNeeded>VISION_MAX_TILES){
-        const maxH=VISION_MAX_TILE_H+stride*(VISION_MAX_TILES-1);
-        const extra=maxH/outH;
-        outW=Math.max(1,Math.round(outW*extra));
-        outH=Math.max(1,Math.round(outH*extra));
-      }
-    }
+    // Every decision about SIZE and SLICING is made here, by the module-scope
+    // function that test-vision-tiling.mjs runs. Below this line is only the
+    // canvas work that carries the plan out.
+    const {outW,outH,tiles}=planVisionTiles(srcW,srcH);
 
     const canvas=document.createElement("canvas");
     const ctx=canvas.getContext("2d");
     const out=[];
-    if(!isTall||outH<=VISION_MAX_TILE_H){
-      canvas.width=outW; canvas.height=outH;
-      ctx.drawImage(bmp,0,0,srcW,srcH,0,0,outW,outH);
+    for(const t of tiles){
+      canvas.width=outW; canvas.height=t.h;
+      ctx.clearRect(0,0,outW,t.h);
+      // Map this destination slice back to its source rectangle. A single-tile
+      // plan has top=0 and h=outH, so this is the whole image.
+      const sy=(t.top/outH)*srcH, sh=(t.h/outH)*srcH;
+      ctx.drawImage(bmp,0,sy,srcW,sh,0,0,outW,t.h);
       out.push({b64:await canvasToBase64(canvas,VISION_JPEG_QUALITY),mediaType:"image/jpeg"});
-    } else {
-      for(let top=0,n=0;top<outH&&n<VISION_MAX_TILES;top+=stride,n++){
-        const h=Math.min(VISION_MAX_TILE_H,outH-top);
-        if(h<=0) break;
-        canvas.width=outW; canvas.height=h;
-        ctx.clearRect(0,0,outW,h);
-        // Map this destination slice back to its source rectangle.
-        const sy=(top/outH)*srcH, sh=(h/outH)*srcH;
-        ctx.drawImage(bmp,0,sy,srcW,sh,0,0,outW,h);
-        out.push({b64:await canvasToBase64(canvas,VISION_JPEG_QUALITY),mediaType:"image/jpeg"});
-        if(top+h>=outH) break;
-      }
     }
     // Cheap triage frame: the WHOLE image at low resolution, used to answer
     // one question before we pay for the expensive read -- "is this one
