@@ -197,6 +197,55 @@ caught. 7/7 with that in place.
 The other ten pull requests merged that day were audited afterwards: every one
 carried both `gates` and `render-safety`, successful, on its own head commit.
 
+### The gate that tested its own copy of the rule
+
+**Shape:** A guard that cannot fail · Two authors per fact
+
+`test-catalog-quality.mjs` is the suite that exists to stop the corruption at
+the top of this entry — a calculated, fee-inclusive figure stored as published
+MSRP. It declared its own `acceptCatalogRow` and imported nothing.
+
+Replacing the rejection inside `gateMsrpRows` with `if (false)` — deleting the
+quality gate that every make's write path runs through:
+
+| | result |
+|---|---|
+| `test:catalog-quality` | **8/8 passed, all green** |
+| all 136 gates declared in `gates.yml` | **136/136 passed** |
+
+Its own comment said *"Mirrors the gate in `scripts/lib/tci-stack.mjs`"*. The
+price rule is not in `tci-stack.mjs` and never was; it is `gateMsrpRows` in
+`catalog-io.mjs`.
+
+**A replica is not merely a gate that cannot fail. It is a second author, and
+this one was wrong in both directions.** On price it was weaker than the rule it
+claimed to mirror — it accepted `msrp: 0`, negatives and `"ask us"`, all of
+which production has always rejected. On trims it was stricter than production
+and wrong about it: it said *no grade → reject the row*, where production
+deliberately KEEPS the stub, because for Crown and GR86 the stub row is the only
+row those models have and refusing it would drop the model from the catalogue.
+So a reader asking "what does the catalogue refuse?" got the wrong answer from
+the file whose whole job is to answer that.
+
+`gateMsrpRows` is now exported and imported, and the trim half is asserted
+against `usableGradeName` and `resolveTrim` themselves. Delete either rule and
+the suite throws on load instead of passing. 22 assertions became 29.
+
+Two mutations were MISSED on the first run, both the gate's fault and both the
+shapes this file already names. The wiring assertion searched the source for the
+call, so commenting the line out still matched — a guard bound to spelling,
+inside the gate written about a replica. And every internal-code case exercised
+`looksLikeInternalCode`, so emptying `GRADE_STUBS` broke production with the
+suite green; that set exists precisely because `looksLikeInternalCode` lets
+`LTD` and `BASE` through and its regex cannot see a single character, so `N`
+passes it. 6/6 after both were closed.
+
+**Not generalised, deliberately.** 15 of 89 `test-*.mjs` suites import nothing
+from production. Some are legitimate — the migration suites spawn
+`apply-migrations.mjs` as a subprocess, which is production. A blanket gate
+would need an allowlist built to make the new gate pass, which is *a guard
+calibrated from imagination*. It is separate work, not a rider on this one.
+
 ### Landed
 
 | | |
@@ -212,6 +261,8 @@ carried both `gates` and `render-safety`, successful, on its own head commit.
 | `32414f5` | a catalogue row cannot confirm a powertrain it never stated (PR #518) |
 | `bf37f70` | a refusal that reads correctly with no make, and an override date that means verified (PR #519) |
 | `981a514` | "could not tell" is no longer read as "not an all-in province" — and a workflow that cannot start is no longer green (PR #520) |
+| `6ae7012` | the 2026-09-22 ledger closed, and the gate that deleted its own gate (PR #521) |
+| `127363d` | `test:catalog-quality` tests the production rule instead of its own copy of it (PR #522) |
 
 Migrations `20260810` + `20260922f` applied, all 8 post-conditions held against
 the live database. Catalogue verified intact at 1,512 rows throughout. Edge
