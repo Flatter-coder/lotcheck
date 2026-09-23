@@ -23,12 +23,20 @@ import { pickTrimMsrp } from "../supabase/functions/_shared/trim-match.js";
 import { applyConditionToMsrp } from "../supabase/functions/_shared/msrp-basis.ts";
 
 // Mirrors analyze-quote's buildAnalysis mapping exactly.
-function decide({ statedOnDocument, catalogValue, catalogMatchType, catalogTrim = null, make = "Hyundai" }) {
+//
+// priceBasis/statedBasis default to the SAME declared basis here so the cases
+// below exercise the accusation logic rather than the comparability refusal.
+// The refusal has its own cases at the end of this file, and the exhaustive set
+// lives in test-msrp-authority.mjs. A fixture that leaves both bases unset would
+// pass every "no accusation" assertion for the wrong reason.
+function decide({ statedOnDocument, catalogValue, catalogMatchType, catalogTrim = null, make = "Hyundai",
+                  priceBasis = "excl_freight", statedBasis = "excl_freight" }) {
   const basis = catalogMatchType === "exact" ? "exact" : "starting_at";
   return resolveMsrpAuthority({
     statedMsrp: Number(statedOnDocument) || 0,
-    ref: catalogValue != null ? { msrp: Number(catalogValue), trim: catalogTrim, basis, sourceUrl: null } : null,
+    ref: catalogValue != null ? { msrp: Number(catalogValue), trim: catalogTrim, basis, sourceUrl: null, priceBasis } : null,
     make,
+    statedBasis,
   });
 }
 
@@ -148,3 +156,37 @@ const check = (label, cond, detail = "") => {
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
 process.exit(fail ? 1 : 0);
+
+// 10. THE QUOTE PATH'S OWN FREIGHT TRAP.
+//
+// analyze-quote:1600 prints, verbatim and signed: "this quote lists MSRP as
+// $X, but <make>'s published MSRP for this exact trim is $Y -- $Z higher than
+// the published figure." In AB/ON/BC/QC the dealer's advertised figure is
+// ALL-IN by law, and half the catalogue is ex-freight, so Z was the freight.
+{
+  const d = decide({ statedOnDocument: 71470, catalogValue: 68000, catalogMatchType: "exact",
+                     catalogTrim: "xDrive30i", make: "BMW",
+                     priceBasis: "excl_freight", statedBasis: "incl_freight" });
+  check("BMW all-in quote vs ex-freight catalogue raises NO accusation",
+    d.inflation === null, JSON.stringify(d.inflation));
+  check("...and the refusal names the reason",
+    d.inflationRefused && d.inflationRefused.why === "basis_mismatch",
+    JSON.stringify(d.inflationRefused));
+}
+{
+  // 758 of 1,512 live rows carry no basis at all.
+  const d = decide({ statedOnDocument: 71470, catalogValue: 68000, catalogMatchType: "exact",
+                     catalogTrim: "xDrive30i", make: "BMW",
+                     priceBasis: null, statedBasis: "incl_freight" });
+  check("a NULL-basis row raises no accusation on the quote path", d.inflation === null);
+  check("...and says it was the catalogue row that could not be compared",
+    d.inflationRefused && d.inflationRefused.why === "no_basis_on_catalog_row",
+    JSON.stringify(d.inflationRefused));
+}
+{
+  // Real padding, one shared basis: still named. The guard must not disarm it.
+  const d = decide({ statedOnDocument: 81499, catalogValue: 59999, catalogMatchType: "exact",
+                     catalogTrim: "Preferred", priceBasis: "excl_freight", statedBasis: "excl_freight" });
+  check("genuine padding on a shared basis is still named on the quote path",
+    !!d.inflation && d.inflation.overBy === 21500, JSON.stringify(d.inflation));
+}
