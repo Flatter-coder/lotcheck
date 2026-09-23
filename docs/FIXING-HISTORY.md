@@ -144,7 +144,7 @@ is live rather than restating what was already there.
 
 | | |
 |---|---|
-| `f432323` | the deploy reads back what it shipped, and fails on a mismatch (PR #527) |
+| `f432323` | the deploy reads back what it shipped, and fails on a mismatch (PR #528) |
 
 All **137** gates declared in `gates.yml` pass. `check:lineage` was re-pinned
 `anon#11f75de3` → `anon#4bd4971c`: that gate names anonymous functions by a
