@@ -23,7 +23,39 @@
  *            inflation:{dealerStated:number,manufacturer:number,overBy:number}|null,
  *            reference:{msrp:number,trim:string|null,basis:string,sourceUrl:string|null,make:string|null}|null}}
  */
-export function resolveMsrpAuthority({ statedMsrp, ref, make = null }) {
+/**
+ * Are two price figures measured the same way, so that subtracting one from the
+ * other means anything?
+ *
+ * WHY THIS GUARDS THE ACCUSATION. The inflated-sticker callout used to be a bare
+ * `stated > msrp * 1.03 && stated - msrp > 800`. `ref.priceBasis` was received
+ * and passed through, and never consulted. In Alberta, Ontario, BC and Quebec an
+ * advertised price is ALL-IN by law, while half the catalogue is ex-freight or
+ * carries no declared basis at all — so a dealer obeying the advertising rules
+ * to the letter was accused of padding the sticker, by exactly the freight:
+ *
+ *   BMW      msrp 68,000 ex-freight vs all-in 71,470 -> "overBy 3,470"
+ *   Chevrolet msrp 36,899 ex-freight vs all-in 40,042 -> "overBy 3,143"
+ *
+ * $3,470 is BMW Alberta's own published Freight & PDI, to the dollar. Both
+ * thresholds sat below this market's freight range (CA$2,000–4,400), so the test
+ * could not distinguish a padded sticker from a legally-required one. That text
+ * is printed verbatim in a signed report naming the dealer.
+ *
+ * So: no comparison without a known, matching basis on BOTH sides. An unknown
+ * basis is not a match — it is the reason there is no claim. We do not repair it
+ * by adding freight to the MSRP ourselves; a basis is declared by the source or
+ * it is absent.
+ */
+function basesComparable(refBasis, statedBasis) {
+  const a = refBasis == null ? null : String(refBasis).trim().toLowerCase();
+  const b = statedBasis == null ? null : String(statedBasis).trim().toLowerCase();
+  const known = (x) => x === "excl_freight" || x === "incl_freight";
+  if (!known(a) || !known(b)) return false;
+  return a === b;
+}
+
+export function resolveMsrpAuthority({ statedMsrp, ref, make = null, statedBasis = null }) {
   const stated = Number(statedMsrp);
   const hasStated = Number.isFinite(stated) && stated > 0;
   const hasRef = !!ref && Number(ref.msrp) > 0;
@@ -35,7 +67,22 @@ export function resolveMsrpAuthority({ statedMsrp, ref, make = null }) {
 
   // EXACT trim match -> the manufacturer's figure is the MSRP, full stop.
   if (ref.basis === "exact") {
-    const materiallyHigher = hasStated && stated > Number(ref.msrp) * 1.03 && stated - Number(ref.msrp) > 800;
+    // The size of the gap is necessary but never sufficient. Comparability comes
+    // first, because a gap between two figures measured differently is not a gap.
+    const comparable = basesComparable(ref.priceBasis, statedBasis);
+    const gapIsMaterial = hasStated && stated > Number(ref.msrp) * 1.03 && stated - Number(ref.msrp) > 800;
+    const materiallyHigher = comparable && gapIsMaterial;
+    // An absence is NOTED, never green: when the gap is material but we cannot
+    // compare, say so rather than staying silent or accusing.
+    const inflationRefused = !comparable && gapIsMaterial
+      ? {
+          why: ref.priceBasis == null ? "no_basis_on_catalog_row"
+             : statedBasis == null ? "no_basis_on_stated_figure"
+             : "basis_mismatch",
+          catalogBasis: ref.priceBasis || null,
+          statedBasis: statedBasis || null,
+        }
+      : null;
     return {
       msrp: Number(ref.msrp),
       basis: "exact",
@@ -48,6 +95,7 @@ export function resolveMsrpAuthority({ statedMsrp, ref, make = null }) {
       dealerStatedMsrp: hasStated && stated !== Number(ref.msrp) ? stated : null,
       // Only an inflated sticker gets NAMED as a tactic.
       inflation: materiallyHigher ? { dealerStated: stated, manufacturer: Number(ref.msrp), overBy: Math.round(stated - Number(ref.msrp)) } : null,
+      inflationRefused,
       reference: null,
     };
   }

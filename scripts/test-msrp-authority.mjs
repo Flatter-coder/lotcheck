@@ -27,9 +27,49 @@ check("exact beats a slightly higher dealer figure (no inflation claim)",
   resolveMsrpAuthority({ statedMsrp: 33800, ref: exact(33609) }),
   { msrp: 33609, basis: "exact", dealerStatedMsrp: 33800, inflation: null });
 
+// AN ACCUSATION REQUIRES A SHARED BASIS. The gap alone is not enough. In
+// AB/ON/BC/QC an advertised price is ALL-IN by law, while half the catalogue is
+// ex-freight or declares no basis at all — so a bare subtraction accused a
+// compliant dealer of padding the sticker, by exactly the freight.
 check("materially inflated sticker is still named as a tactic",
-  resolveMsrpAuthority({ statedMsrp: 40000, ref: exact(33609) }),
+  resolveMsrpAuthority({ statedMsrp: 40000, ref: { ...exact(33609), priceBasis: "excl_freight" }, statedBasis: "excl_freight" }),
   { msrp: 33609, basis: "exact", inflation: { dealerStated: 40000, manufacturer: 33609, overBy: 6391 } });
+
+// ...and the SAME gap, across bases we cannot compare, is refused.
+check("the same gap across mismatched bases is NOT an accusation",
+  resolveMsrpAuthority({ statedMsrp: 40000, ref: { ...exact(33609), priceBasis: "excl_freight" }, statedBasis: "incl_freight" }),
+  { msrp: 33609, basis: "exact", inflation: null });
+
+check("a NULL-basis catalogue row can never support an accusation",
+  resolveMsrpAuthority({ statedMsrp: 40000, ref: { ...exact(33609), priceBasis: null }, statedBasis: "incl_freight" }),
+  { inflation: null });
+
+check("a caller that states no basis gets no accusation",
+  resolveMsrpAuthority({ statedMsrp: 40000, ref: { ...exact(33609), priceBasis: "excl_freight" } }),
+  { inflation: null });
+
+// The refusal is NOTED, not silent — an absence is never rendered green.
+check("a refused accusation says why",
+  resolveMsrpAuthority({ statedMsrp: 40000, ref: { ...exact(33609), priceBasis: null }, statedBasis: "incl_freight" }).inflationRefused,
+  { why: "no_basis_on_catalog_row", catalogBasis: null, statedBasis: "incl_freight" });
+
+// The incident this whole module guards: a signed report told a named dealer
+// their $81,499 sticker should have been $59,999. On one shared basis that gap
+// is real, and must still be named.
+check("the 81,499 vs 59,999 incident still fires when bases match",
+  resolveMsrpAuthority({ statedMsrp: 81499, ref: { ...exact(59999), priceBasis: "excl_freight" }, statedBasis: "excl_freight" }).inflation,
+  { dealerStated: 81499, manufacturer: 59999, overBy: 21500 });
+
+// Freight-sized gaps are exactly what the old thresholds (3% and $800) could not
+// tell apart from a padded sticker: this market's freight is CA$2,000–4,400, and
+// $3,470 is BMW Alberta's own published Freight & PDI.
+check("a freight-sized gap across bases is refused (BMW, overBy would be 3,470)",
+  resolveMsrpAuthority({ statedMsrp: 71470, ref: { ...exact(68000), priceBasis: "excl_freight" }, statedBasis: "incl_freight" }),
+  { inflation: null });
+
+check("...and GM's freight too (3,143)",
+  resolveMsrpAuthority({ statedMsrp: 40042, ref: { ...exact(36899), priceBasis: "excl_freight" }, statedBasis: "incl_freight" }),
+  { inflation: null });
 
 check("identical figures -> nothing to flag",
   resolveMsrpAuthority({ statedMsrp: 33609, ref: exact(33609) }),
