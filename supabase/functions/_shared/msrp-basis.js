@@ -79,12 +79,24 @@ export function referenceBasis(a) {
  * @param {string} make
  */
 export function basisRefusal(why, make) {
-  const m = String(make || "").trim() || "the manufacturer";
+  // The fallback carries NO article: every sentence below supplies its own
+  // ("the ${m} figure", "The ${m} figure", "the ${m} MSRP"). A fallback of
+  // "the manufacturer" collided with all three and printed, in a signed report:
+  //
+  //   "and the the manufacturer figure we hold for this trim..."
+  //   "The the manufacturer figure we hold for this trim..."
+  //   "We hold a the manufacturer MSRP for this trim..."
+  //
+  // Only on the unnamed-make path, which is why it survived: every fixture had
+  // a make. canada-terms.ts:45 records the same collision being fixed once
+  // already — "replacing the bare token first produced 'the the provincial
+  // registry'". Same mistake, different file.
+  const m = String(make || "").trim() || "manufacturer's";
   if (why === "no_all_in") {
     return `Advertised prices here are all-in — freight, levies and the dealer fee are already inside the number — and the ${m} figure we hold for this trim is before those. Subtracting one from the other would count about $3,000 of mandatory fees as markup, so no over/under-MSRP claim is made. That is a gap in our catalogue, not a finding about the price.`;
   }
   if (why === "incl_freight") {
     return `The ${m} figure we hold for this trim already includes freight and PDI, and this listing does not state whether its price does — so no over/under-MSRP claim is made. That is a gap in our catalogue, not a finding about the price.`;
   }
-  return `We hold a ${m} MSRP for this trim but never recorded whether that figure includes freight and PDI, and the difference is roughly $2,000 — so no over/under-MSRP claim is made. That is a gap in our catalogue, not a finding about the price.`;
+  return `We hold the ${m} MSRP for this trim but never recorded whether that figure includes freight and PDI, and the difference is roughly $2,000 — so no over/under-MSRP claim is made. That is a gap in our catalogue, not a finding about the price.`;
 }

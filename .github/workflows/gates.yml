@@ -529,6 +529,16 @@ jobs:
       # assertions below its exit while its PR claimed "24 -> 27".
       - name: Every suite's assertions actually run
         run: npm run check:assertions-reachable
+      # basisRefusal is what a buyer reads INSTEAD of an over/under figure, and
+      # it is printed verbatim in a signed report — so it is copy, and copy that
+      # only works on the happy path ships broken on the other one. Its
+      # templates each supply their own article ("the ${m} figure") and the
+      # fallback for an unnamed make was "the manufacturer", so all three
+      # printed "the the manufacturer" / "a the manufacturer". Every fixture
+      # passed a make, so the fallback had no coverage. Second occurrence:
+      # canada-terms.ts:45 records "the the provincial registry".
+      - name: A refusal reads correctly even with no make
+        run: npm run test:refusal-copy
       # 20260916a was applied on 2026-09-16 and reported success. Three of its
       # seven statements matched ZERO rows, because they addressed rows by
       # surrogate id and the daily catalog refresh rotated every id in that

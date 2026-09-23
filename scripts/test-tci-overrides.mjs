@@ -189,5 +189,46 @@ const RUNNER_2026_09_22 = [
 // assertions appended below it, so those assertions never ran and the suite
 // reported 18/18 green over untested code — the same shape as the gate that
 // exits before its own checks.
+
+// ---- the override's own date means VERIFIED, not WRITTEN ------------------
+// The rows are re-asserted on every run, but nobody re-reads Lexus.ca each
+// morning. Stamping the run timestamp would claim a daily re-verification that
+// does not happen — the figure would look current while being exactly as old.
+//
+// The honest cost is that these 17 rows read as weeks stale beside a scraper's
+// fresh ones. A stale scrape and an unre-verified hand-seeded figure need
+// DIFFERENT remedies — fix the scraper, or re-read the manufacturer's page —
+// and fetched_at alone cannot tell them apart, so each row carries its own
+// provenance.
+{
+  const { rows } = applyTciOverrides([], "Lexus");
+  const seeded = rows.filter((r) => r.attrs && r.attrs.seeded === "tci-override");
+
+  check("every injected row is marked as hand-seeded",
+    seeded.length === rows.length && rows.length > 0,
+    `${seeded.length} of ${rows.length}`);
+
+  check("fetched_at is the FROZEN verification date, not a run timestamp",
+    rows.every((r) => r.fetched_at === "2026-08-26T00:00:00.000Z"),
+    "stamping new Date() would claim a re-verification that never happened");
+
+  // The decisive one: a run timestamp would be within seconds of now.
+  const RUN = Date.now();
+  check("fetched_at is not within a day of the run",
+    rows.every((r) => Math.abs(RUN - Date.parse(r.fetched_at)) > 86_400_000),
+    "a fresh-looking date on a figure nobody re-read is the defect, not the fix");
+
+  check("each row records WHEN it was verified",
+    rows.every((r) => r.attrs && /^\d{4}-\d{2}-\d{2}$/.test(String(r.attrs.verified_on || ""))),
+    JSON.stringify(rows[0] && rows[0].attrs));
+
+  check("...and says what its age MEANS, so the right remedy is obvious",
+    rows.every((r) => r.attrs && /re-asserted every run, not re-read/.test(String(r.attrs.freshness_note || ""))),
+    "age here means unre-verified, not a failing scraper");
+
+  check("the verification date agrees with fetched_at",
+    rows.every((r) => String(r.fetched_at).slice(0, 10) === r.attrs.verified_on));
+}
+
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
 process.exit(fail ? 1 : 0);
