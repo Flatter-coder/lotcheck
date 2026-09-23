@@ -166,6 +166,61 @@ function statedDrive(s) {
 // Conservative in the same direction as the drivetrain rule above: the figure
 // is still shown, as a floor. Only the label is withheld, and only when the
 // listing actually stated a powertrain.
+// DRIVETRAIN IS CORROBORATION, NEVER IDENTIFICATION.
+//
+// rowConfirmsConfig asks whether a row CONTRADICTS the stated configuration.
+// This asks the prior question: did the row identify the car at all? An
+// "exact" label is a claim that this MSRP is the sticker for THIS vehicle, and
+// the buyer's over/under figure is subtracted from it.
+//
+// Two ways a row reaches "exact" without having identified anything, both
+// measured on this branch against a listing asking $44,995:
+//
+//   1. A row with NO trim name takes no penalty from any scoring rule — the
+//      conflict rules only punish a row for naming the WRONG grade, and a row
+//      that names none makes no competing claim. So where the listing states a
+//      grade the catalogue does not carry, every properly named row takes -5
+//      and the nameless row wins at 0. Measured: exact at $41,995 against a
+//      catalogue holding Limited $52,995 and Luxury $56,995 — "$3,000 OVER
+//      MSRP" from a row that does not say which car it is. Drop that one row
+//      and the same listing correctly refuses to compare.
+//
+//   2. Where neither side's grade is in KEY_TOKENS, no conflict rule fires at
+//      all, so drivetrain (+4) is the only thing scoring — and 83.9% of live
+//      rows carry no drivetrain. A listing for a "Comfortline AWD" picked the
+//      "Highline" row at $45,995 over the Comfortline row at $38,995, purely
+//      because Highline's row happened to have its drivetrain filled in.
+//      3 of 5 sweep shapes picked the wrong row; all three said "exact".
+//
+// So: where the listing names a grade, the row has to name one that overlaps
+// it. Sharing a drivetrain is not naming the same car — it is the evidence
+// that survives when 5 of 6 rows cannot answer, which is exactly when it
+// should count for least.
+//
+// Only DISCRIMINATING tokens count, for the same reason the scorer uses them:
+// a catalog that repeats "MAZDA CX-90 MILD HYBRID INLINE 6 TURBO" on every row
+// would otherwise let any row "overlap" any listing on the model name alone.
+//
+// The figure is unaffected — this decides the LABEL, the way
+// hasMoreSpecificSibling does. A row we cannot confirm is still the best answer
+// available and is still returned, as "starting_at".
+// A ROW THAT NAMES ONLY A DRIVETRAIN IS THE ANSWER ONLY WHEN THE LADDER HAS
+// NOTHING BETTER. Some models really are sold as one trim distinguished by
+// drivetrain alone, and the catalog stores that row as "AWD" — test:trim pins
+// it, and it is right to: there is no better-named row it could have lost to.
+// What is wrong is the same row winning while a properly named row sits beside
+// it, which is the whole defect above. So the question is not "does this row
+// name a grade" but "did it beat one that did".
+function rowIdentifiesTheCar(r, s, common, pool) {
+  if (!r || !String(r.trim == null ? "" : r.trim).trim()) return false;
+  const disc = (t) => contentTokens(t).filter((x) => !common.has(x));
+  const want = disc(s && s.trim);
+  if (!want.length) return true;              // no grade stated -> nothing to confirm
+  const mine = disc(r.trim);
+  if (!mine.length) return !(pool || []).some((o) => o !== r && disc(o.trim).length);
+  return mine.some((t) => want.includes(t));
+}
+
 function rowConfirmsConfig(r, s) {
   const stated = statedDrive(s);
   const statedFuel = s && s.fuelType ? fuelKind(s.fuelType) : null;
@@ -262,7 +317,11 @@ export function pickTrimMsrp(rows, sig) {
     const r = valid[0];
     // One row cannot pin a configuration the listing names, so the same test
     // applies here — a lone row is the likeliest place to over-claim.
-    const exact = !!r.trim && rowConfirmsConfig(r, s) && !priceImplausible(r.msrp, s.quotedPrice);
+    // With a single row there is no shared-token noise to strip, so `common`
+    // is empty.
+    const exact = rowIdentifiesTheCar(r, s, new Set(), [r])
+      && rowConfirmsConfig(r, s)
+      && !priceImplausible(r.msrp, s.quotedPrice);
     return { msrp: Number(r.msrp), trim: r.trim || null, basis: exact ? "exact" : "starting_at", score: 0 };
   }
 
@@ -293,8 +352,23 @@ export function pickTrimMsrp(rows, sig) {
     // Drivetrain — strong: match +4, mismatch -6 (near-exclusion). Reads the
     // trim name as well as the column, so a catalog that encodes drivetrain as
     // "XSE AWD" still discriminates instead of scoring it as unknown.
+    //
+    // BUT A MATCH ONLY EARNS THE FULL +4 FROM A ROW THAT ALSO NAMED THE GRADE.
+    // The conflict rules below only punish a row for naming the WRONG grade, so
+    // where the listing's grade is not in KEY_TOKENS nothing fires and +4 is the
+    // only thing scoring — decided entirely by which row happens to have its
+    // drivetrain column filled in, which 83.9% of live rows do not. Measured: a
+    // "Comfortline AWD" listing picked the Highline row at $45,995 over the
+    // Comfortline row at $38,995, and a row whose whole trim name was "AWD"
+    // beat it too.
+    //
+    // The mismatch stays -6: a row that states the WRONG drivetrain is still
+    // disqualifying evidence whatever it is called. Only the reward shrinks,
+    // because corroborating a configuration is not identifying a car.
     const rDrive = rowDrive(r);
-    if (wantDrive && rDrive) sc += wantDrive === rDrive ? 4 : -6;
+    if (wantDrive && rDrive) {
+      sc += wantDrive !== rDrive ? -6 : (rowIdentifiesTheCar(r, s, common, pool) ? 4 : 1);
+    }
     // Trim-name token overlap (order-independent, drivetrain words excluded).
     for (const t of contentTokens(r.trim)) if (wantTokens.has(t)) sc += KEY_TOKENS.has(t) ? 2 : 1;
     // Trim-name CONFLICT — both sides name a grade and they share none of them.
@@ -395,7 +469,12 @@ export function pickTrimMsrp(rows, sig) {
     // claim measured against the cheaper trim. So when the pool still holds a
     // strictly more specific sibling the listing did not rule out, the figure
     // stands and the label stays honest.
-    const basis = (rowConfirmsConfig(top.r, s)
+    // ONE AUTHOR FOR THE SHARED HALF. The trim requirement lived only in the
+    // single-row branch above; this branch never had it, so a nameless row was
+    // refused when it was alone and accepted when it had company — the state
+    // in which there is a better-named row sitting right beside it.
+    const basis = (rowIdentifiesTheCar(top.r, s, common, pool)
+      && rowConfirmsConfig(top.r, s)
       && !priceImplausible(top.r.msrp, s.quotedPrice)
       && !trimNameIsAmbiguous(pool, top.r)
       && !hasMoreSpecificSibling(pool, top.r, common)) ? "exact" : "starting_at";
