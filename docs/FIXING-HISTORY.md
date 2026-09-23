@@ -246,6 +246,68 @@ from production. Some are legitimate — the migration suites spawn
 would need an allowlist built to make the new gate pass, which is *a guard
 calibrated from imagination*. It is separate work, not a rider on this one.
 
+### Drivetrain is corroboration, never identification
+
+**Shapes:** One-surface fix · A guard that cannot fail · Absence read as knowledge
+
+`exact` is the label that authorises an over/under-MSRP figure against a named
+dealer. A row could earn it without having identified the car at all.
+
+**1. A row with no trim name takes no penalty from any scoring rule.** The
+conflict rules punish a row for naming the WRONG grade; a row naming none makes
+no competing claim, so it is untouched — and wins at 0 while every properly
+named row takes −5.
+
+| catalogue | listing says | before |
+|---|---|---|
+| *(no trim)* $41,995 · Limited $52,995 · Luxury $56,995 | Preferred | **exact @ $41,995 → "$3,000 OVER MSRP"** |
+| the same with the nameless row removed | Preferred | starting_at, no claim |
+
+The single-row path had required a trim since the Mach-E fix. This branch never
+did — so the row was **refused when it was alone and accepted once a
+better-named row stood beside it**. That is the one-surface shape in its purest
+form: the guard was added to one of two branches of the same decision.
+
+**2. Where neither side's grade is in `KEY_TOKENS`, no conflict rule fires at
+all**, so drivetrain (+4) is the only thing scoring — and which row wins is
+decided by which one happens to have its drivetrain column filled in. **83.9% of
+live rows do not.**
+
+| listing | picked | should have picked |
+|---|---|---|
+| Comfortline AWD | **Highline $45,995** *(exact)* | Comfortline $38,995 |
+| Comfortline AWD | **"AWD" $45,995** *(exact)* | Comfortline $38,995 |
+| Comfortline AWD | ***(nameless)*** **$45,995** *(exact)* | Comfortline $38,995 |
+
+3 of 5 sweep shapes picked the wrong row; all three said `exact`. A column that
+5 of 6 rows cannot answer was deciding the answer, which is the worst moment for
+it to count for most.
+
+**3. A third case, found by mutation-testing the fix rather than by the audit.**
+The single-row path asked only whether the row HAD a name, never whether it was
+the name the listing states. A lone `Highline` row at $38,995 against a
+`Comfortline` listing asking $41,995 printed **"$3,000 OVER MSRP"**.
+
+The rule is now one function with one author and three call sites: where the
+listing names a grade, the row must name one that overlaps it.
+
+**And the rule is not "does the row name a grade" but "did it beat one that
+did".** Some models really are sold as one trim split by drivetrain, and the
+catalogue stores that row as `"AWD"`. `test:trim` already pinned that, and the
+first version of this fix broke it — **the existing suite caught the
+over-correction before it shipped**, which is the first time in this log a gate
+has stopped a fix rather than a regression. There is no better-named row such a
+row could have lost to, so it still identifies the car.
+
+The figure is untouched throughout; this decides the LABEL, the way
+`hasMoreSpecificSibling` does. A row we cannot confirm is still the best answer
+available and is still returned, as `starting_at`.
+
+61 → 69 cases. 6/6 mutations caught, every one against production. Two escaped
+the first run: one had no covering case — which is how the third defect above
+was found — and one silently failed to modify the file and was reported
+`NOT APPLIED` rather than as a catch.
+
 ### Landed
 
 | | |
@@ -263,6 +325,8 @@ calibrated from imagination*. It is separate work, not a rider on this one.
 | `981a514` | "could not tell" is no longer read as "not an all-in province" — and a workflow that cannot start is no longer green (PR #520) |
 | `6ae7012` | the 2026-09-22 ledger closed, and the gate that deleted its own gate (PR #521) |
 | `127363d` | `test:catalog-quality` tests the production rule instead of its own copy of it (PR #522) |
+| `85bf311` | the gate that tested its own copy of the rule, logged (PR #523) |
+| `36b048b` | drivetrain is corroboration, never identification (PR #524) |
 
 Migrations `20260810` + `20260922f` applied, all 8 post-conditions held against
 the live database. Catalogue verified intact at 1,512 rows throughout. Edge
