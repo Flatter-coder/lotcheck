@@ -148,6 +148,55 @@ would have replayed from cache for the TTL, and the freight-as-padding accusatio
 would have kept going out to named dealers after the fix deployed, looking
 exactly like the fix not working.
 
+### The gate that deleted its own gate
+
+**Shape:** Green signal, no check · Absence read as knowledge
+
+The step added to run the new quote-basis check was written
+
+```yaml
+- name: "Could not tell" never renders as "not an all-in province"
+```
+
+The quoted scalar closes after `tell`, and the rest is trailing junk. GitHub
+could not parse `gates.yml`, so it did not start it — the run carries zero jobs
+and is named by its path instead of its `name:`. **No `gates` check was ever
+attached to the pull request.**
+
+`gh pr view` then reported `mergeStateStatus: CLEAN` over a single Vercel
+comment check, and the waiter watching the PR exits when nothing is pending.
+Nothing was pending, because nothing had started.
+
+| | checks present on the head commit | read as |
+|---|---|---|
+| PR #519 | `gates` success, `render-safety` success | green |
+| PR #520 | *neither one present* | green |
+
+What that PR fixes is that "could not tell" must not be read as "not an all-in
+province". It had its own verification removed by the shape it is about.
+
+`check:jobs` already refused a workflow GitHub never **sees** — the dotless
+`github/workflows/` that hid a daily job for 46 days. It now also refuses one
+GitHub sees and **refuses to start**, because both end the same way: a job that
+never runs and never goes red. The scope is written into the gate rather than
+implied: it catches a value that opens with a quote and does not close cleanly,
+it is not a YAML parser, and it cannot check the file it is declared in, since a
+`gates.yml` GitHub will not start cannot run its own gate.
+
+So the durable half is not a gate at all. **A required check that is ABSENT must
+never be read as a check that passed**, and the merge waiter now names `gates`
+and `render-safety` and refuses until both are present *and* successful on the
+exact head sha.
+
+Two of the first mutations written against the new guard silently failed to
+modify the file, and one of those still printed `ok` — the same defect, one
+level up. The suite now reports `NOT APPLIED` when a mutation does not change
+the file, so a mutation that never landed cannot read as a mutation that was
+caught. 7/7 with that in place.
+
+The other ten pull requests merged that day were audited afterwards: every one
+carried both `gates` and `render-safety`, successful, on its own head commit.
+
 ### Landed
 
 | | |
@@ -157,6 +206,12 @@ exactly like the fix not working.
 | `4c60c5d` | a migration can prove its own effect (PR #511) |
 | `5a786bd` | refuse to re-run a seed migration that would empty the catalogue (PR #512) |
 | `e8b9b60` | an inflated-sticker accusation requires a shared price basis (PR #513) |
+| `25f6a7a` | the PDF stops making an over/under-MSRP claim the report itself refuses (PR #515) |
+| `e813b25` | a powertrain mis-tag is proven by our own catalogue, not by the batch it arrived in (PR #516) |
+| `644dddc` | `all_in_price` is published by the maker, never assembled by us from a sibling's fee stack (PR #517) |
+| `32414f5` | a catalogue row cannot confirm a powertrain it never stated (PR #518) |
+| `bf37f70` | a refusal that reads correctly with no make, and an override date that means verified (PR #519) |
+| `981a514` | "could not tell" is no longer read as "not an all-in province" — and a workflow that cannot start is no longer green (PR #520) |
 
 Migrations `20260810` + `20260922f` applied, all 8 post-conditions held against
 the live database. Catalogue verified intact at 1,512 rows throughout. Edge
