@@ -519,6 +519,16 @@ jobs:
       # source or it is absent.
       - name: all_in_price is published by the maker, never assembled by us
         run: npm run test:all-in-not-synthesised
+      # A suite that prints its summary and exits BEFORE some of its assertions
+      # reports green over code that never ran — the purest "guard that cannot
+      # fail", since every stranded assertion holds in every world including the
+      # broken one. It happens by appending a case below a summary that is
+      # already there, and it is invisible because the suite still says
+      # "N/N passed". Four in one day on 2026-09-22; three caught by noticing the
+      # total had not moved, one shipped — test-quote-msrp-authority carried five
+      # assertions below its exit while its PR claimed "24 -> 27".
+      - name: Every suite's assertions actually run
+        run: npm run check:assertions-reachable
       # 20260916a was applied on 2026-09-16 and reported success. Three of its
       # seven statements matched ZERO rows, because they addressed rows by
       # surrogate id and the daily catalog refresh rotated every id in that
