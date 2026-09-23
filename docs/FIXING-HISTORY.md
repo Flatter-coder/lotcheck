@@ -25,6 +25,202 @@ the next instance.
 | **A field read from the wrong node** | the document really does carry the field, the selector really did match, and the count is full - but it describes a DIFFERENT entity. A dealer's logo answering "what does this car look like", a similar-vehicles rail card answering "which car is this page about", a registry returning a real licence that belongs to somebody else. The guard is never a blocklist of bad values; it is making the wrong node unreachable |
 
 ---
+---
+
+## 2026-09-22 — the freight was the accusation, and 22 migrations were holding a knife
+
+**Shapes:** One-surface fix · A guard that cannot fail · Green signal, no check ·
+A check run at the wrong moment
+
+### What Vic asked
+
+"fix it msrp catalge" — after an earlier session where he said, of a vehicle
+around $68,000, *"it dosent settles… which means msrp cataloge is wrong, why did
+fail?"*
+
+### The catalogue number was not wrong. The comparison was.
+
+`resolveMsrpAuthority` named a dealer's sticker as padded on a bare subtraction:
+
+```js
+const materiallyHigher = hasStated && stated > Number(ref.msrp) * 1.03 && stated - Number(ref.msrp) > 800;
+```
+
+`ref.priceBasis` was received, declared in the jsdoc, and passed through to the
+caller. It was never consulted by the test.
+
+In Alberta, Ontario, BC and Quebec an advertised price is **all-in by law**.
+758 of the 1,512 live catalogue rows are ex-freight or declare no basis at all.
+So a dealer following the advertising rules to the letter was accused of padding
+the sticker — **by exactly the freight**:
+
+| | our MSRP | dealer all-in | printed as |
+|---|---|---|---|
+| BMW | 68,000 ex-freight | 71,470 | `overBy 3,470` |
+| Chevrolet | 36,899 ex-freight | 40,042 | `overBy 3,143` |
+| Toyota | 45,000 ex-freight | 47,050 | `overBy 2,050` |
+
+**$3,470 is BMW Alberta's own published Freight & PDI, to the dollar.** Both
+thresholds — 3% and $800 — sit *below* this market's freight range of
+CA$2,000–4,400, so the test could not tell a padded sticker from a legally
+required one. `analyze-quote` prints that difference verbatim, in a signed
+report, naming the dealer and the make.
+
+### This was fixed five weeks ago, everywhere except here
+
+The `CACHE_VER` history holds the receipt. Version **13o**: *"a price is no
+longer compared across two bases on ANY surface."* It reached the hero band, the
+on-screen gap bar and counter-script move S14. It never reached
+`msrp-authority.js`, whose inflation callout kept subtracting across bases for
+another five weeks — while the changelog entry said "any surface".
+
+A one-surface fix that *documents itself as complete* is worse than one that
+doesn't, because the note is what stops the next person looking.
+
+### The gates were green because their fixtures declared no basis
+
+`test:msrp-authority` and `test:quote-msrp-authority` both built their `ref`
+objects without a `priceBasis`, and passed no stated basis. Every "no accusation"
+assertion passed for the wrong reason, and the one accusation assertion passed
+because nothing was checking comparability. **A guard that cannot fail.**
+
+Both suites now declare a basis on every fixture, and a fixture that declares
+nothing is asserted to produce **no** accusation — so the old shape cannot return
+as a passing test.
+
+### 22 migrations were one command away from emptying the catalogue
+
+Separately, and found while applying two unrelated migrations: 22 files in
+`supabase/migrations/` open with
+
+```sql
+DELETE FROM msrp_catalog WHERE make IN (...);
+```
+
+and then seed by hand. Each was correct the day it ran. Re-running one today
+throws away the scraped, trim-pinned, basis-bearing rows that replaced it and
+puts August's base models back — NULL trim, NULL `price_basis`, no `source_url`.
+
+**Measured against the live catalogue: those 22 files target 1,506 of the 1,512
+live rows.** `--all-since 20260808` does it in one call. Naming one file by hand
+looks identical to the legitimate call that applied the legal register the same
+afternoon, and the run prints a green tick because the statements execute
+perfectly well. One of them —
+`20260808_euro_british_msrp_catalog.sql` — reinstates the Jaguar and Land Rover
+rows that `20260912b_purge_unsourced_jlr.sql` deliberately removed *for producing
+false accusations against dealers*.
+
+The guard counts what each statement would remove **from the live database**
+before executing anything, and refuses above a declared budget. Keyed on damage,
+not on filename — so an already-run purge matches nothing and passes, a seed
+re-run refuses, and there is no list of dangerous files to maintain or to rot.
+
+### The legal register had never existed
+
+`20260810_legal_register.sql` had sat unapplied since 10 August. Every legal row
+written since went into a file, never a table, and nothing reads that register at
+runtime — so nothing would ever have said so. It surfaced only because
+`20260922f` was the first migration that *writes* to it, and a missing **table**
+errors where a missing **row** does not. **Green signal, no check.**
+
+A migration may now state its own post-condition:
+
+```sql
+-- @assert: (select count(*) from public.legal_control ...) = 6
+```
+
+evaluated in the database, after the statements run, failing the migration if it
+does not come back `true`. NULL fails. No rows fails. A non-boolean fails.
+
+### And I reported "all gates green" on a gate that could not have run
+
+`check:cache-ver` passed locally and failed in CI. The gate diffs **committed**
+changes against the merge base, so it can only fire once the commit exists. My
+local run predated the commit: green meant *"nothing had changed yet."*
+
+That shape is already in the table at the top of this file — **"A check run at
+the wrong moment"** — with a cache gate named as the example. It was written
+down, and I still walked into it. The lesson is not new; the discipline is:
+**run the gates again after committing, not only before.**
+
+Had it not failed, `analysis.msrpInflation` — computed server-side and stored —
+would have replayed from cache for the TTL, and the freight-as-padding accusation
+would have kept going out to named dealers after the fix deployed, looking
+exactly like the fix not working.
+
+### Landed
+
+| | |
+|---|---|
+| `787ef1f` | the standing Alberta crawl is on, scope enforced in code (PR #509) |
+| `f01d8b7` | a missing relation names the migration nobody applied (PR #510) |
+| `4c60c5d` | a migration can prove its own effect (PR #511) |
+| `5a786bd` | refuse to re-run a seed migration that would empty the catalogue (PR #512) |
+| `e8b9b60` | an inflated-sticker accusation requires a shared price basis (PR #513) |
+
+Migrations `20260810` + `20260922f` applied, all 8 post-conditions held against
+the live database. Catalogue verified intact at 1,512 rows throughout. Edge
+functions deployed on `e8b9b60`; `CACHE_VER` 18f → 18g.
+
+### Still open
+
+A 190-agent adversarial audit raised 61 findings; **44 survived** three
+independent refutation passes. The five above close part of it. The worst that
+remain:
+
+- gas 4Runner trims are written daily tagged `fuel_type: 'Hybrid'`, a model
+  rename having disarmed the powertrain refusal
+- `Cadillac LYRIQ` and `Cadillac Lyriq` are two catalogues for one car. Same
+  year, same trim name: **2026 LYRIQ Luxury $74,242** against **2026 Lyriq
+  Luxury $70,399** — **$3,843 apart**, and which one a buyer is quoted depends
+  on capitalisation, because the key is case-sensitive and the lookup is not.
+  *A key built on a mutable name*
+- the upper-case `LYRIQ` rows are where the junk collects: trims of `button.`,
+  `MAY`, `NaN 2026 LYRIQ`, and three separate `null`-trim rows at $74,042 and
+  $82,842 — page chrome stored as a trim name, each one a candidate denominator
+- 29 of Toyota's 124 rows are 36–42 days old while the make reads fresh, because
+  a make is aged by its **newest** row
+- no gate asserts `price_basis` coverage or make coverage
+
+### The audit's own defect: 190 agents, one stale working directory
+
+Its highest-severity finding was that the **PDF** recomputes a raw `qp − msrp` in
+three places and bypasses the basis gate — cited at
+`email-quote-report/index.ts:1120`, `:1449`, `:1533`, and confirmed **3 of 3** by
+independent skeptics told to refute it.
+
+**It is false on `main`.** There, `diff` comes from `qualifyMsrpClaim(a).delta`
+at lines 237–240 and 309–312: the PDF routes through the same gate as the web
+report, and the file says so in a comment — *"The over/under claim is decided by
+`_shared/msrp-claim.ts`, never here."*
+
+The agents were reading the working directory, which is checked out to
+`feat/pdf-vehicle-photo` — 2,813 lines against `main`'s 2,921, and behind it.
+Every verifier read the same stale file, so three independent refutation passes
+produced three independent confirmations of the same artefact. **Adversarial
+verification does not help when every adversary reads the same wrong source.**
+
+The same artefact produced a second false finding, and that one I repeated aloud:
+*"`rowIsStale` does not exist anywhere in the repo"*, reported as evidence that
+the per-row staleness guard shipped on 2026-09-03 had never really landed. It is
+at `scripts/catalog-refresh-guard.mjs:56` on `main`, from `e87e211` — *"a make
+that refreshes 100 of 134 rows is no longer green"*. It is absent only on the
+branch the agents read. I disavowed a shipped fix on an agent's word without
+checking `main`, which is the same failure as trusting any other unverified
+source, and it is worse than the original finding because it was mine to check.
+
+I had already told Vic this was the next thing to fix. It isn't. The two findings
+acted on above were each re-verified against `origin/main` before anything
+shipped — the `materiallyHigher` line at `e8b9b60~1:38`, and the `delete from
+msrp_catalog` in all 22 migration files as they exist on `main` — which is the
+only reason they stand.
+
+**The guard is procedural, and it is now written down:** a finding gets a line
+number only after that line is read at the ref the fix will land on. A cited
+line that resolves to unrelated code is the finding's own refutation, and
+checking five commit hashes and three line numbers is what caught this one before
+it became a permanent entry in this file.
+
 
 ## 2026-09-22 — the rate went unexamined, and the monthly figure hid it
 
