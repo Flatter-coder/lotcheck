@@ -40,6 +40,7 @@ import { partitionByScope } from "./lib/crawl-blocklist.mjs";
 import { politeFetch, requestLedger } from "./lib/polite-fetch.mjs";
 import { extractConvertusVmsRoot } from "../supabase/functions/_shared/convertus-vms.js";
 import { pathToFileURL } from "node:url";
+import { appendFileSync } from "node:fs";
 
 const DRY = process.argv.includes("--dry-run");
 const HOST_ARG = (() => { const i = process.argv.indexOf("--host"); return i > -1 ? process.argv[i + 1] : null; })();
@@ -540,7 +541,7 @@ async function main() {
     }
   }
 
-  let totals = { dealers: 0, rows: 0, new: 0, priced: 0, delisted: 0, failed: 0, robotsSkipped: 0 };
+  let totals = { dealers: 0, rows: 0, upserted: 0, new: 0, priced: 0, delisted: 0, failed: 0, robotsSkipped: 0 };
 
   for (const d of dealers) {
     console.log(`${d.name || d.host}`);
@@ -617,6 +618,10 @@ async function main() {
         if (error) { console.warn(`    upsert failed: ${error.message}`); failed = true; break; }
         totals.new += data?.new || 0;
         totals.priced += data?.price_changes || 0;
+        // Observations written, whether or not anything about them CHANGED.
+        // new and priced are both 0 on a day when every listing is unchanged,
+        // and a downstream step gated on those would skip a day we really read.
+        totals.upserted += chunk.length;
       }
       for (const r of result.rows) seenByCond[r.condition === "new" ? "new" : "used"].push(r.vin);
     }
@@ -659,6 +664,27 @@ async function main() {
   if (opened.length) {
     console.log(`   circuits opened for: ${opened.map((h) => h.origin).join(", ")}`);
     console.log("   Those hosts refused repeatedly and were left alone for the rest of the run.");
+  }
+
+  // WHAT THE NEXT STEP IS ALLOWED TO BELIEVE.
+  //
+  // The two steps after this one in crawl-inventory.yml write to the database
+  // and are documented as running only after a real crawl wrote something. They
+  // used to be gated on `!inputs.dry_run` -- the operator's INTENTION, restated
+  // in a second language. On a `schedule` event there are no inputs at all, so
+  // that expression read the empty string as "not a dry run" while this
+  // script's own argv read the same absence as "dry run". The standing crawl
+  // dry-ran every night and both write steps ran anyway.
+  //
+  // So the fact is published here, by the only process that knows it: rows this
+  // run actually handed to fn_upsert_listings and got an accepted response for.
+  // Not "was --dry-run absent", and not "did the step exit 0".
+  if (process.env.GITHUB_OUTPUT) {
+    const wrote = !DRY && totals.upserted > 0;
+    appendFileSync(process.env.GITHUB_OUTPUT, `wrote=${wrote}
+upserted=${totals.upserted}
+`);
+    console.log(`   step output: wrote=${wrote} (${totals.upserted} observation row(s) accepted)`);
   }
 
   if (totals.failed === totals.dealers && totals.dealers > 0) process.exit(1);
