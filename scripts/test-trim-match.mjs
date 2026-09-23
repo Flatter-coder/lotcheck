@@ -407,6 +407,91 @@ const CASES = [
   ["HR-V LX AWD stays exact on its own row", HRV,
     { trim: "LX AWD", drivetrain: "AWD", fuelType: "Gas", quotedPrice: 37381 }, 33100, "exact"],
 
+
+  // ==========================================================================
+  // DRIVETRAIN IS CORROBORATION, NEVER IDENTIFICATION.
+  //
+  // "exact" is the label that authorises an over/under-MSRP figure, so the
+  // winning row has to have identified the car. Two ways it did not, both
+  // measured on the pre-fix branch against a listing asking $44,995:
+  //
+  //  1. A row with NO trim name takes no penalty from any scoring rule — the
+  //     conflict rules only punish naming the WRONG grade, and a row naming
+  //     none makes no competing claim. Where the listing states a grade this
+  //     catalogue does not carry, every properly named row takes -5 and the
+  //     nameless row wins at 0: "exact" at $41,995 beside Limited $52,995 and
+  //     Luxury $56,995, printing "$3,000 OVER MSRP" from a row that does not
+  //     say which car it is. The single-row path had required a trim since the
+  //     Mach-E fix; this branch never did — so the row was REFUSED when alone
+  //     and ACCEPTED once a better-named row stood next to it.
+  //
+  //  2. Where neither side's grade is in KEY_TOKENS, no conflict rule fires,
+  //     so drivetrain (+4) is the only thing scoring — decided by which row
+  //     happens to have its drivetrain column filled in, which 83.9% of live
+  //     rows do not. 3 of 5 sweep shapes picked the wrong row; all three said
+  //     "exact".
+  ["a row that names no trim is never exact, however well it scores", [
+    { trim: null,      msrp: 41995, fuel_type: "Gas" },
+    { trim: "Limited", msrp: 52995, fuel_type: "Gas" },
+    { trim: "Luxury",  msrp: 56995, fuel_type: "Gas" },
+  ], { trim: "Preferred", fuelType: "Gas", quotedPrice: 44995 }, 41995, "starting_at"],
+
+  // The listing's grade is not in KEY_TOKENS, so nothing penalises the rival.
+  // Before: Highline won on its drivetrain column alone and was called exact.
+  ["an unrecognised grade does not lose to a rival that merely shares a drivetrain", [
+    { trim: "Comfortline", drivetrain: null,  msrp: 38995, fuel_type: "Gas" },
+    { trim: "Highline",    drivetrain: "AWD", msrp: 45995, fuel_type: "Gas" },
+  ], { trim: "Comfortline", drivetrain: "AWD", fuelType: "Gas", quotedPrice: 40495 }, 38995, "starting_at"],
+
+  // Same, where the rival names no grade at all — a bare drivetrain row.
+  ["a bare drivetrain row does not outrank a row that names the stated grade", [
+    { trim: "Comfortline", drivetrain: null,  msrp: 38995, fuel_type: "Gas" },
+    { trim: "AWD",         drivetrain: "AWD", msrp: 45995, fuel_type: "Gas" },
+  ], { trim: "Comfortline", drivetrain: "AWD", fuelType: "Gas", quotedPrice: 40495 }, 38995, "starting_at"],
+
+  // Same, where the rival is nameless AND carries the drivetrain.
+  ["a nameless row with a drivetrain does not outrank a named row without one", [
+    { trim: "Comfortline", drivetrain: null,  msrp: 38995, fuel_type: "Gas" },
+    { trim: null,          drivetrain: "AWD", msrp: 45995, fuel_type: "Gas" },
+  ], { trim: "Comfortline", drivetrain: "AWD", fuelType: "Gas", quotedPrice: 40495 }, 38995, "starting_at"],
+
+  // THE RULE IS "DID IT BEAT A BETTER-NAMED ROW", NOT "DOES IT NAME A GRADE".
+  // Some models really are sold as one trim split by drivetrain, and the
+  // catalogue stores that row as "AWD". There is no better-named row it could
+  // have lost to, so it still identifies the car. The first version of this
+  // fix refused it, and the case below (already in this file) caught that —
+  // it is repeated here with the reasoning attached.
+  ["a lone drivetrain-only row still identifies the car", [
+    { trim: "AWD", msrp: 58025, fuel_type: "Hybrid" },
+  ], { trim: "Premium Hybrid AWD", vinDrive: "AWD", fuelType: "Hybrid" }, 58025, "exact"],
+
+  // A ladder split ONLY by drivetrain: no row names a grade, so drivetrain is
+  // the identification rather than a substitute for one.
+  ["a ladder split only by drivetrain still resolves exactly", [
+    { trim: "FWD", drivetrain: "FWD", msrp: 41995, fuel_type: "Gas" },
+    { trim: "AWD", drivetrain: "AWD", msrp: 44995, fuel_type: "Gas" },
+  ], { trim: "Premium", drivetrain: "AWD", fuelType: "Gas", quotedPrice: 45995 }, 44995, "exact"],
+
+  // The pool rule lets drivetrain identify the car when NO row names a grade.
+  // That must not extend to a row with no trim AT ALL: it has not named the
+  // grade OR the model, and "exact" would be a claim about a row that says
+  // nothing but a drivetrain column. Only the explicit no-trim clause stops
+  // this one — the pool rule cannot, because no other row names a grade
+  // either. It escaped the first mutation run for exactly that reason.
+  ["a nameless row is never exact even where drivetrain alone would identify", [
+    { trim: null,  drivetrain: "AWD", msrp: 44995, fuel_type: "Gas" },
+    { trim: "FWD", drivetrain: "FWD", msrp: 41995, fuel_type: "Gas" },
+  ], { trim: "Preferred", drivetrain: "AWD", fuelType: "Gas", quotedPrice: 46995 }, 44995, "starting_at"],
+
+  // A SINGLE ROW STILL HAS TO BE THE RIGHT TRIM. The single-row path asked
+  // only whether the row HAD a name, never whether it was the name the
+  // listing states. So a catalogue holding one row for this model, filed
+  // under a different grade, was called exact: measured, a lone Highline row
+  // at $38,995 against a Comfortline listing asking $41,995 printed
+  // "$3,000 OVER MSRP". Found by mutation testing this fix, not by the audit.
+  ["a lone row filed under a different grade is not this car", [
+    { trim: "Highline", drivetrain: "AWD", msrp: 38995, fuel_type: "Gas" },
+  ], { trim: "Comfortline", drivetrain: "AWD", fuelType: "Gas", quotedPrice: 41995 }, 38995, "starting_at"],
   // SINGLE-ROW MODELS — must keep working (no regressions).
   ["Compass (single base row)", COMPASS, { trim: "Sport", fuelType: "Gas" }, 34700],
   ["Lexus RZ (single base row, trim present)", RZ, { trim: "AWD Luxury", fuelType: "BEV" }, 59990],
