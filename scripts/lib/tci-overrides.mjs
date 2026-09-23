@@ -95,10 +95,31 @@ export function applyTciOverrides(scrapedRows, makeName, overrides = TCI_OVERRID
   });
 
   const injected = [];
-  const now = "2026-08-26T00:00:00.000Z";
+  // NOT "now". This is the date these figures were VERIFIED against the
+  // manufacturer's own pages, and it is deliberately frozen: the override
+  // re-asserts them on every run, but nobody re-reads Lexus.ca each morning.
+  // Stamping the run timestamp would claim a daily re-verification that does not
+  // happen — the figure would look current while being exactly as old.
+  //
+  // The cost of the truth is that these 17 rows read as 28 days stale beside a
+  // scraper's fresh ones, and nothing said WHY. A stale scrape and a
+  // hand-verified figure need different responses — fix the scraper, or re-read
+  // the manufacturer's page — and fetched_at alone cannot tell them apart. So
+  // the rows now carry their own provenance.
+  const VERIFIED_ON = "2026-08-26T00:00:00.000Z";
   for (const [k, o] of byKey) {
     for (const row of o.rows) {
-      injected.push({ year: o.year, make: o.make, model: o.model, trim: row.trim, msrp: row.msrp, fuel_type: row.fuel_type, fetched_at: now });
+      injected.push({
+        year: o.year, make: o.make, model: o.model, trim: row.trim, msrp: row.msrp,
+        fuel_type: row.fuel_type, fetched_at: VERIFIED_ON,
+        attrs: {
+          seeded: "tci-override",
+          verified_on: VERIFIED_ON.slice(0, 10),
+          // Says plainly that age here means "unre-verified", not "the scraper
+          // is failing" — so a freshness report can name the right remedy.
+          freshness_note: "hand-verified against the manufacturer on this date; re-asserted every run, not re-read",
+        },
+      });
     }
     replaced.push({ key: k, dropped: dropped.get(k) || 0, inserted: o.rows.length });
   }
