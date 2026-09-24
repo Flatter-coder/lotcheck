@@ -40,7 +40,7 @@ Entry chain: `app.html` → `/src/main.jsx` → `src/App.jsx` (mounted on `#root
 - **`api/track-visit.js`** — Vercel serverless function (visit tracking).
 - **`public/`** — static assets and standalone HTML pages served as-is:
   `lotcheck-landing.html`, `dealer-portal.html`, `canada-map.html`,
-  `statcan-zev-map.html`, `privacy.html`, `index.html`, plus `sw.js`
+  `statcan-zev-map.html`, `privacy.html`, `home-classic.html` (the retired landing page), plus `sw.js`
   (service worker), `manifest.json`, icons, and `data/statcan-zev.json`.
 - **`.github/workflows/update-statcan-zev.yml`** — scheduled job that refreshes
   the StatCan ZEV dataset. (It lived in a **dotless** `github/workflows/` until
@@ -57,8 +57,11 @@ Entry chain: `app.html` → `/src/main.jsx` → `src/App.jsx` (mounted on `#root
 
 ## Deployment
 
-Vercel. Routing/headers live in **`vercel.json`** — `/` serves `index.html`,
-everything except `/api/*` rewrites to `/app.html`.
+Vercel. Routing/headers live in **`vercel.json`** — `/` and everything except
+`/api/*` rewrite to `/app.html` (since 2026-09-24 the home page is the React
+welcome screen). **Never put an `index.html` in `public/`:** Vercel serves a real
+file at `/` BEFORE any rewrite, so it silently wins over the `/ → /app.html` rule.
+The old static landing page lives on as `public/home-classic.html`.
 
 ## Gotchas (read before editing config)
 

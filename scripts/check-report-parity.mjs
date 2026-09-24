@@ -504,7 +504,7 @@ for (const { field, app, email } of SURFACES) {
 // comparing them as a SET. The intake card no longer makes that promise at
 // all (the ten are still named, with real values, on the report itself), so
 // there is nothing left for this rule to compare. The landing page's own
-// "what we advertise" section (public/index.html) still carries the
+// "what we advertise" section (public/home-classic.html) still carries the
 // equivalent promise and is still checked, in check-report-points.mjs.
 
 if (failures.length) {
