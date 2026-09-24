@@ -34,7 +34,7 @@ const eq = (what, got, want) => { if (got !== want) fail(what, got, want); };
 
 // The real listing, as captured.
 const BMW = {
-  make: "BMW", model: "X3",
+  make: "BMW", model: "X3", year: 2026,
   addOns: [{ name: "Freight and PDI", price: 4395 }, { name: "Other Fees", price: 989.75 }],
 };
 
@@ -63,19 +63,23 @@ console.log("2. it never says the dealer added anything");
   if (!/ask/i.test(r.explain)) fail("it tells the buyer what to do", r.explain, "an ask");
 }
 
+// A FIXTURE THAT NAMES A REAL MODEL DECAYS THE DAY THAT MODEL IS CAPTURED.
+// These used Ford F-150 and Kia Telluride as "a model we hold nothing for";
+// both became catalogued on 2026-09-24. The rule under test is "no published
+// figure", so the fixture is a make no catalogue will ever hold.
 console.log("3. it refuses rather than guesses");
 {
   eq("no published figure -> listing only",
-    freightLine({ make: "Ford", model: "F-150", addOns: [{ name: "Freight and PDI", price: 2695 }] }).state, "listing_only");
+    freightLine({ make: "Nonesuch Motors", model: "Roadster", addOns: [{ name: "Freight and PDI", price: 2695 }] }).state, "listing_only");
   eq("no listing figure -> published only",
-    freightLine({ make: "BMW", model: "X3", addOns: [] }).state, "published_only");
+    freightLine({ make: "BMW", model: "X3", year: 2026, addOns: [] }).state, "published_only");
   eq("neither -> not read",
-    freightLine({ make: "Kia", model: "Telluride", addOns: [] }).state, "not_read");
+    freightLine({ make: "Nonesuch Motors", model: "Roadster", addOns: [] }).state, "not_read");
   // A comparison must never be drawn from one number.
   for (const st of ["listing_only", "published_only", "not_read"]) {
-    const a = st === "listing_only" ? { make: "Ford", model: "F-150", addOns: [{ name: "Freight", price: 2695 }] }
-      : st === "published_only" ? { make: "BMW", model: "X3", addOns: [] }
-        : { make: "Kia", model: "Telluride", addOns: [] };
+    const a = st === "listing_only" ? { make: "Nonesuch Motors", model: "Roadster", addOns: [{ name: "Freight", price: 2695 }] }
+      : st === "published_only" ? { make: "BMW", model: "X3", year: 2026, addOns: [] }
+        : { make: "Nonesuch Motors", model: "Roadster", addOns: [] };
     const r = freightLine(a);
     if (r.delta !== null) fail(`${st} draws no difference`, r.delta, null);
   }
@@ -109,7 +113,7 @@ console.log("5. a gap raises the fees point, it never renders TRANSPARENT");
 }
 {
   // At or below the published figure, the point stays clear and SAYS so.
-  const ok = { make: "Toyota", model: "RAV4", addOns: [{ name: "Freight & PDI", price: 1930 }] };
+  const ok = { make: "Toyota", model: "RAV4", year: 2026, addOns: [{ name: "Freight & PDI", price: 1930 }] };
   const b = reportBands(ok).find((x) => x.key === "fees");
   eq("at published stays clear", b.state, "clear");
   if (!String(b.note).includes("$1,930")) fail("and states the comparison", b.note, "the figure");
@@ -118,7 +122,7 @@ console.log("5. a gap raises the fees point, it never renders TRANSPARENT");
 {
   // A flagged add-on keeps its own headline and gains the freight sentence.
   const both = {
-    make: "BMW", model: "X3",
+    make: "BMW", model: "X3", year: 2026,
     addOns: [{ name: "Freight and PDI", price: 4395 }, { name: "Paint protection", price: 1899, verdict: "flagged" }],
     totalFlaggedCost: 1899,
   };
@@ -139,6 +143,41 @@ console.log("6. freight rides inside the fees point, it is not an eleventh");
   eq("and ten on an empty analysis", empty.length, 10);
 }
 
+// ── 7. destination-only is a different line, never an "above" ─────────────
+// Porsche prints a "Destination Charge" and bills PDI inside its separate dealer
+// fee. A listing's "Freight and PDI" line is bigger by the PDI, and calling that gap "above
+// published" would put the dealer's inspection charge in front of a buyer as
+// something to question -- the 2026-08-27 inversion (manufacturer money read
+// as dealer money) with the roles swapped.
+console.log("7. a destination-only figure is named, not compared");
+{
+  const r = freightLine({ make: "Porsche", model: "Macan", year: 2026, addOns: [{ name: "Freight and PDI", price: 3950 }] });
+  eq("state", r.state, "different_basis");
+  eq("no difference is drawn", r.delta, null);
+  if (!/does not say that figure includes pre-delivery inspection/.test(r.explain)) fail("it says what the maker's figure does not state", r.explain, "PDI not stated");
+  const b = reportBands({ make: "Porsche", model: "Macan", year: 2026, addOns: [{ name: "Freight and PDI", price: 3950 }] }).find((x) => x.key === "fees");
+  if (b.state === "raise") fail("a basis difference does not raise the point", b.state, "not raise");
+  const pub = freightLine({ make: "Porsche", model: "Macan", year: 2026, addOns: [] });
+  if (!/a figure it does not say includes PDI/.test(pub.explain)) fail("published-only copy names the basis", pub.explain, "does not say includes PDI");
+}
+
+// ── 8. the listing's model year picks the published figure ────────────────
+// VW's own Alberta offers: 2026 Atlas $2,250, 2027 Atlas $2,450. Before model
+// year was part of the key, a 2027 Atlas charged exactly what VW publishes
+// would have read "$200 above published".
+console.log("8. a 2027 car is measured against the 2027 figure");
+{
+  const r27 = freightLine({ make: "Volkswagen", model: "Atlas", year: 2027, addOns: [{ name: "Freight and PDI", price: 2450 }] });
+  eq("2027 at VW's 2027 figure", r27.state, "compared");
+  eq("2027 published", r27.published, 2450);
+  const r26 = freightLine({ make: "Volkswagen", model: "Atlas", year: 2026, addOns: [{ name: "Freight and PDI", price: 2450 }] });
+  eq("the same charge on a 2026 is above VW's 2026 figure", r26.state, "above");
+  eq("by", r26.delta, 200);
+  const r30 = freightLine({ make: "Volkswagen", model: "Atlas", year: 2030, addOns: [{ name: "Freight and PDI", price: 2450 }] });
+  eq("a year we hold nothing for is not compared", r30.state, "listing_only");
+}
+
+
 if (failures) {
   console.error(`\n${failures} assertion(s) failed.`);
   process.exit(1);
@@ -146,5 +185,6 @@ if (failures) {
 console.log(
   "\nOK — the measured BMW case reads $925 above published, the copy states figures " +
   "without asserting an act, a missing figure refuses instead of guessing, a gap never " +
-  "renders TRANSPARENT, and the canonical ten is unchanged.",
+  "renders TRANSPARENT, a destination-only figure is never compared to freight and PDI, " +
+  "the listing's model year picks the published figure, and the canonical ten is unchanged.",
 );

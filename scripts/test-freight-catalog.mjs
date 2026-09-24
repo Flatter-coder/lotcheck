@@ -17,8 +17,8 @@
 //
 // Run: node --experimental-strip-types scripts/test-freight-catalog.mjs
 
-import { freightCatalog } from "../supabase/functions/_shared/fee-schedule.ts";
-import { verifyRow, assess, moneyNear, sourceUrlOf, NOT_READ } from "./lib/freight-verify.mjs";
+import { freightCatalog, freightFor } from "../supabase/functions/_shared/fee-schedule.ts";
+import { verifyRow, assess, moneyNear, sourceUrlOf, NOT_READ, robotsVerdict, numbersAtKey, amountsByLabel } from "./lib/freight-verify.mjs";
 
 let failures = 0;
 const fail = (what, got, want) => {
@@ -52,6 +52,87 @@ console.log("1. every freight row names its source, its date and a plausible amo
     if (!r.label) fail(`${who}: label`, r.label, "the maker's own wording");
   }
   console.log(`   ${rows.length} row(s) checked`);
+}
+
+// ── 1b. every row can be re-read, or says why it cannot ───────────────────
+// 2026-09-24: 38 of 45 rows named their source in prose only, so the daily job
+// re-read 7 and reported the rest as a backlog nobody owned. A row now carries
+// a sourceUrl on the MAKER'S OWN domain, or an `unsourced` reason in words --
+// never a guessed URL, and never neither.
+console.log("1b. each row: a maker-owned source URL or a stated reason, a model year, what it covers");
+{
+  // WHOSE PAGE IT IS, per make. The vendor rule (CLAUDE.md): a freight figure
+  // is the substance of a report, so it comes from the manufacturer and nobody
+  // else -- not a dealer's site, not a window-sticker service, not a
+  // marketplace. A new make fails here until its own domains are named, which
+  // is the review this list exists to force.
+  const MAKER_DOMAINS = {
+    Acura: ["acura.ca", "api.honda.ca"],
+    // BMW's configurator (configure.bmw.ca) reads its prices from this host.
+    BMW: ["bmw.ca", "bmw.cloud"],
+    Chevrolet: ["chevrolet.ca", "gm.ca"],
+    Chrysler: ["chrysler.ca", "stellantisnorthamerica.com"],
+    Ford: ["ford.ca"],
+    Honda: ["honda.ca", "hondanews.ca", "api.honda.ca"],
+    Hyundai: ["hyundaicanada.com"],
+    Infiniti: ["infiniti.ca", "infinitinews.com"],
+    Jeep: ["jeep.ca", "stellantisnorthamerica.com"],
+    Kia: ["kia.ca"],
+    Lexus: ["lexus.ca"],
+    Lincoln: ["lincolncanada.com", "lincoln.ca"],
+    Lucid: ["lucidmotors.com"],
+    Maserati: ["maserati.com"],
+    // Mazda's own configurator calls this API Gateway (scripts/scrape-mazda.mjs);
+    // the host is AWS's, the answer is Mazda Canada's.
+    Mazda: ["mazda.ca", "n8xgyscaa3.execute-api.ca-central-1.amazonaws.com"],
+    MINI: ["mini.ca"],
+    Mitsubishi: ["mitsubishi-motors.ca", "mitsubishi-motors-pr.ca"],
+    Nissan: ["nissan.ca", "nissannews.com"],
+    Polestar: ["polestar.com"],
+    Porsche: ["porsche.com"],
+    Ram: ["ramtruck.ca", "stellantisnorthamerica.com"],
+    Rivian: ["rivian.com"],
+    Subaru: ["subaru.ca"],
+    Toyota: ["toyota.ca"],
+    Volkswagen: ["vw.ca", "vwtools.ca"],
+    Volvo: ["volvocars.com"],
+  };
+  const seenKey = new Map();
+  for (const r of freightCatalog()) {
+    const who = `${r.make} ${r.model} MY${r.modelYear}`;
+    // "current": the maker's live price list names no year (BMW) -- see Fee.
+    if (r.modelYear !== "current" && (!Number.isInteger(r.modelYear) || r.modelYear < 2025 || r.modelYear > 2028)) {
+      fail(`${who}: modelYear is a current model year`, r.modelYear, "2025..2028 or \"current\"");
+    }
+    if (r.modelYear === "current" && !r.read) fail(`${who}: a "current" row is read from a live price list`, r.read, "a read spec");
+    if (r.covers !== "freight_pdi" && r.covers !== "freight_only") {
+      fail(`${who}: covers says whether PDI is inside the figure`, r.covers, "freight_pdi | freight_only");
+    }
+    // ONE ROW PER (make, model, year). freightFor would silently answer with
+    // the first, and the verifier's upsert refuses two rows for one key.
+    const k = `${r.make}|${r.model}|${r.modelYear}`.toLowerCase();
+    if (seenKey.has(k)) fail(`${who}: duplicate row`, k, "one row per make, model and model year");
+    seenKey.set(k, true);
+
+    const hasUrl = /^https:\/\//.test(String(r.sourceUrl || ""));
+    const hasReason = String(r.unsourced || "").trim().length >= 20;
+    if (!hasUrl && !hasReason) fail(`${who}: a re-readable https sourceUrl or an unsourced reason`, { sourceUrl: r.sourceUrl, unsourced: r.unsourced }, "one of them");
+    if (hasUrl && r.unsourced) fail(`${who}: sourced AND unsourced`, r.unsourced, "not both");
+    if (hasUrl) {
+      const host = new URL(r.sourceUrl).hostname.toLowerCase();
+      const own = MAKER_DOMAINS[r.make];
+      if (!own) fail(`${who}: MAKER_DOMAINS names ${r.make}'s own domains`, r.make, "an entry");
+      else if (!own.some((d) => host === d || host.endsWith("." + d))) {
+        fail(`${who}: source is on ${r.make}'s own domain`, host, own.join(" | "));
+      }
+    }
+    // An itemised row is the maker's two printed lines; the bundle is their
+    // arithmetic, checked here, and the verifier reads each line by its label.
+    if (r.parts) {
+      if (r.parts.freight + r.parts.pdi !== r.amount) fail(`${who}: parts add up to the amount`, r.parts, r.amount);
+      if (!r.read?.labels?.freight || !r.read?.labels?.pdi) fail(`${who}: an itemised row reads each line by its label`, r.read, "labels.freight + labels.pdi");
+    }
+  }
 }
 
 // ── 2. a figure with no re-readable URL is reported, never assumed fresh ──
@@ -144,13 +225,108 @@ console.log("6. a backlog of missing URLs is amber; a failure to read real pages
   eq("a backlog beside a good read stays green", assess(mixed).red, false);
 }
 
-// ── 7. drift goes red only against our OWN confirmed history ──────────────
-console.log("7. drift is red only where we confirmed the figure before");
+// ── 7. a change is red, whether or not a previous run confirmed it ─────────
+// Until 2026-09-24 drift was red only against a confirmed state stored in
+// freight_verification -- a table that had never been created in production,
+// so every write 404'd, every run was green, and the red path could not fire.
+// A sourced row was read off its source on capturedOn; a different figure
+// there now is a change since that date.
+console.log("7. a changed figure is red; a previous confirmation is named, not required");
 {
   const res = [{ key: "BMW|X3", status: "drifted" }];
-  eq("never confirmed -> amber", assess(res, { previous: {} }).red, false);
+  eq("never confirmed by a run -> still red", assess(res, { previous: {} }).red, true);
   eq("was confirmed -> red", assess(res, { previous: { "BMW|X3": "confirmed" } }).red, true);
-  eq("the regression is named", assess(res, { previous: { "BMW|X3": "confirmed" } }).regressed.length, 1);
+  eq("the regression is named", assess(res, { previous: { "BMW|X3": { status: "confirmed" } } }).regressed.length, 1);
+  eq("not_stated is never red", assess([{ key: "a", status: "not_stated" }, { key: "b", status: "confirmed" }]).red, false);
+}
+
+// ── 8. robots.txt, as RFC 9309 defines honouring it ───────────────────────
+console.log("8. robots.txt: obey 2xx rules, 4xx = no file, 5xx/no answer = disallow");
+{
+  const rules = "User-agent: *\nDisallow: /private/\n\nUser-agent: LotCheckBot\nDisallow: /api/\n";
+  eq("our agent's own group wins", robotsVerdict(200, rules, "/api/prices").status, "robots_disallowed");
+  eq("an allowed path passes", robotsVerdict(200, rules, "/en/offers").ok, true);
+  eq("403 on robots.txt is 'unavailable' -> allowed (§2.3.1.3)", robotsVerdict(403, "", "/x").ok, true);
+  eq("404 -> allowed", robotsVerdict(404, "", "/x").ok, true);
+  eq("500 -> complete disallow (§2.3.1.4)", robotsVerdict(500, "", "/x").status, "robots_unreachable");
+  eq("no answer -> complete disallow", robotsVerdict(0, "", "/x").status, "robots_unreachable");
+  for (const s of ["robots_disallowed", "robots_unreachable"]) {
+    if (!NOT_READ.includes(s)) fail(`NOT_READ covers ${s}`, NOT_READ, "includes " + s);
+  }
+}
+
+// ── 9. reading the maker's own JSON by name ───────────────────────────────
+console.log("9. JSON sources: a field by name, a line item by label, a model by path");
+{
+  // Hyundai's trimallpurchaseOptions: `delivery` beside msrp and fees.
+  const hy = JSON.stringify({ data: { msrp: 32999, delivery: 2200, purchaseOptions: [{ options: [{ dealerAdminFee: 799, fedAirTax: 100 }] }] } });
+  eq("key: delivery", verifyRow({ sourceUrl: "https://x.ca", amount: 2200, read: { key: "delivery" } }, hy).status, "confirmed");
+  eq("key: a changed delivery is drift", verifyRow({ sourceUrl: "https://x.ca", amount: 2100, read: { key: "delivery" } }, hy).status, "drifted");
+  eq("key: msrp beside it is not freight", numbersAtKey(JSON.parse(hy), "delivery").join(","), "2200");
+
+  // Mazda's Trims API: freight and PDE are two printed lines.
+  const mz = JSON.stringify({ data: { trims: [{ financial: { fees: [
+    { title: "Administration Fee", price: 795 }, { title: "A/C Tax", price: 100 },
+    { title: "Freight", price: 1455 }, { title: "PDE", price: 740 }, { title: "AMVIC", price: 10 },
+  ] } }] } });
+  const row = { sourceUrl: "https://x.ca", amount: 2195, parts: { freight: 1455, pdi: 740 }, read: { labels: { freight: "Freight", pdi: "PDE" } } };
+  eq("labels: both lines confirm", verifyRow(row, mz).status, "confirmed");
+  eq("labels: the admin fee is not read as either", JSON.stringify(amountsByLabel(JSON.parse(mz), { freight: "Freight", pdi: "PDE" })), '{"freight":[1455],"pdi":[740]}');
+  eq("labels: one line moving is drift", verifyRow({ ...row, parts: { freight: 1355, pdi: 740 }, amount: 2095 }, mz).status, "drifted");
+  eq("labels: a line gone is not_stated, not drift",
+    verifyRow(row, JSON.stringify({ data: { trims: [{ financial: { fees: [{ title: "Freight", price: 1455 }] } }] } })).status, "not_stated");
+
+  // VW answers every model in ONE response. The path is what binds a figure
+  // to its model: without it, the Jetta's $2,050 would "confirm" any row.
+  const vw = JSON.stringify({ 2026: {
+    jetta: { trims: [{ offers: [{ legal: "a 2026 Jetta ... $2,050 freight and PDI, $100 air conditioning levy" }] }] },
+    atlas: { trims: [{ offers: [{ legal: "a 2026 Atlas ... $2,250 freight and PDI, $100 air conditioning levy" }] }] },
+  } });
+  eq("path: Atlas reads Atlas", verifyRow({ sourceUrl: "https://x.ca", amount: 2250, read: { path: ["2026", "atlas"] } }, vw).status, "confirmed");
+  eq("path: the Jetta's figure does not confirm the Atlas",
+    verifyRow({ sourceUrl: "https://x.ca", amount: 2050, read: { path: ["2026", "atlas"] } }, vw).status, "drifted");
+  eq("path: a model gone from the response is not_stated, not drift",
+    verifyRow({ sourceUrl: "https://x.ca", amount: 2175, read: { path: ["2026", "taos"] } }, vw).status, "not_stated");
+  eq("a page that is not JSON is not_stated", verifyRow({ sourceUrl: "https://x.ca", amount: 1, read: { key: "delivery" } }, "<html>").status, "not_stated");
+}
+
+// ── 10. a change is dated, and keeps the date it was first seen ───────────
+console.log("10. a change names the capture date, today, and the day it first appeared");
+{
+  const r = { sourceUrl: "https://x.ca", amount: 2250, capturedOn: "2026-09-24", read: { path: ["2026", "atlas"] } };
+  const page = JSON.stringify({ 2026: { atlas: { legal: "$2,450 freight and PDI" } } });
+  const first = verifyRow(r, page, 200, { today: "2026-10-01" });
+  eq("status", first.status, "drifted");
+  if (!/captured 2026-09-24/.test(first.note) || !/on 2026-10-01/.test(first.note) || !/first read 2026-10-01/.test(first.note)) {
+    fail("the note carries the capture date, the read date and the first-seen date", first.note, "all three");
+  }
+  const later = verifyRow(r, page, 200, { today: "2026-10-05", previous: { status: "drifted", note: first.note } });
+  eq("a change already seen keeps its first date", later.firstSeen, "2026-10-01");
+  const fresh = verifyRow(r, page, 200, { today: "2026-10-05", previous: { status: "confirmed", note: "the source states $2,250" } });
+  eq("a change after a confirmation is dated today", fresh.firstSeen, "2026-10-05");
+}
+
+// ── 11. the catalogue answers for the right year and the right line ───────
+console.log("11. freightFor: the model year picks the figure; a destination-only figure says so");
+{
+  const years = new Map();
+  for (const r of freightCatalog()) {
+    const k = `${r.make}|${r.model}`;
+    (years.get(k) || years.set(k, []).get(k)).push(r);
+  }
+  for (const [k, rows] of years) {
+    const [make, model] = k.split("|");
+    const current = rows.find((r) => r.modelYear === "current");
+    for (const r of rows) if (r !== current) eq(`${k} MY${r.modelYear}`, freightFor(make, model, r.modelYear)?.amount, r.amount);
+    // A dated row answers only its own year. A "current" row -- the maker's live
+    // price list, no year named -- answers any year we hold no dated row for.
+    const other = 2030;
+    eq(`${k}: a year we do not hold`, freightFor(make, model, other)?.amount ?? null, current ? current.amount : null);
+    const amounts = new Set(rows.map((r) => r.amount));
+    if (amounts.size > 1) eq(`${k}: no year, figures differ by year -> null`, freightFor(make, model), null);
+    else eq(`${k}: no year, every year agrees -> that figure`, freightFor(make, model)?.amount, rows[0].amount);
+  }
+  for (const r of freightCatalog()) eq(`${r.make} ${r.model} MY${r.modelYear} covers`, freightFor(r.make, r.model, r.modelYear)?.covers, r.covers);
 }
 
 if (failures) {

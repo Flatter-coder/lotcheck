@@ -37,11 +37,20 @@
 # disappears. This job does its work whenever it is invoked, and the cron below
 # is the only thing that decides when that is. [[repeat-fix-pattern]]
 #
-# COST: one request per catalogued figure — about a dozen today, growing with
-# coverage — through the shared rate limiter, which sends an honest User-Agent,
-# honours Retry-After and breaks the circuit on a host that refuses. A 403 is
-# recorded as the manufacturer's refusal and never answered by pretending to be
-# Chrome. [[dealer-tos-daily-checks]]
+# COST: one request per catalogued figure with a source URL, plus one robots.txt
+# per host, 750 ms apart, through the shared rate limiter, which sends an honest
+# User-Agent, honours Retry-After and breaks the circuit on a host that refuses.
+# robots.txt is obeyed as RFC 9309 defines it. A 403 is recorded as the
+# manufacturer's refusal and never answered by pretending to be Chrome.
+# [[dealer-tos-daily-checks]]
+#
+# A CHANGE IS RED, AND DATED. Since 2026-09-24 a source that states a different
+# figure than the one we hold fails this run, naming the capture date, the read
+# date and the day the change was first seen. Before that, drift was red only
+# against a confirmed state in freight_verification -- a table that had never
+# been created, so every write 404'd, the run logged a warning and stayed green,
+# and the red path could not fire. A run that cannot read or write that state is
+# now red too.
 name: Freight catalogue verification (daily)
 
 on:

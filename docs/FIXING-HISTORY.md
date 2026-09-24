@@ -27,6 +27,101 @@ the next instance.
 ---
 ---
 
+## 2026-09-24 — a daily freight check that recorded nothing, read 7 of 45 figures, and could not go red
+
+**Shapes:** Green signal, no check · A guard that cannot fail · A field read from the wrong node
+
+### What happened
+
+`freight-verify.yml` ran green every day from 2026-09-17. Its 2026-09-24 run
+said "Freight catalogue: 45 figure(s) across 19 make(s)" and then:
+
+- **38 of the 45 named their source in prose only**, so nothing could re-read
+  them. Seven had a URL. Of those, BMW timed out, Honda answered 403, and
+  Mitsubishi (a PDF), Lincoln and Polestar (client-rendered) loaded without the
+  figure. **Two were actually confirmed.**
+- **Every run logged `could not record verification state: HTTP 404`.** The
+  `freight_verification` table had never been created in production. The job
+  treated the failed write as a warning and exited 0.
+- **The only red path could never fire.** Drift turned the run red only when the
+  figure had been "confirmed on the previous run", which the job read back from
+  that missing table. With nothing stored, no row could ever regress.
+- **One confirmation came from a path robots.txt disallows.** Porsche's
+  `/exclusive-manufaktur` configurator URL is `Disallow`ed. The job never read
+  robots.txt.
+- **Freight was keyed on make and model, not year.** VW's own Alberta offers
+  price the 2026 Atlas at $2,250 and the 2027 at $2,450, and Ford's figures rose
+  $100 to $400 from 2025 to 2026. A 2027 car charged exactly what its maker
+  publishes would have read as above published.
+- **A destination-only figure was compared as freight and PDI.** Porsche's
+  "Destination Charge" excludes PDI (it sits in Porsche's separate dealer fee).
+  Measured against a listing's "Freight and PDI" line, the PDI would have read
+  as the gap.
+- **Two held figures were wrong or unsourceable.**
+  - Ram 1500 was held at $2,195. Stellantis Canada's own release says $2,595.
+  - Lincoln's only source was one VIN's window sticker, served by FordDirect, a
+    dealer-facing service.
+  - BMW, where the directive started, was one model.
+
+### Fix
+
+`69d7f6d`:
+
+- **The catalogue.** `fee-schedule.ts` FREIGHT now holds 282 figures across 25
+  makes.
+  - 280 cite a URL on the maker's own domain, re-read with a plain request, the
+    LotCheckBot User-Agent and robots.txt obeyed.
+  - Where the maker has one, the job reads its own JSON field by name:
+    - Hyundai `delivery`
+    - Mazda Freight + PDE
+    - Toyota/Lexus FPD
+    - Honda/Acura `FreightPdiCost`
+    - Kia `dnd`
+    - BMW's Alberta "Freight" tax line
+    - MINI Freight/PDI
+    - Ford/Lincoln `destinationDeliveryCharge`
+    - VW's offer legal text, reached by a JSON path per model
+  - The two rows it cannot re-read (Chevrolet Silverado 1500, 2026 Lexus ES)
+    carry an `unsourced` reason instead of a guessed URL.
+  - Each row states `modelYear` and `covers` (whether PDI is inside the figure).
+- **The lookup and the card.** `freightFor(make, model, year)` answers only the
+  listing's own year. BMW's list names no year, so its rows are "current".
+  `freightLine` names a destination-only figure and never compares it
+  (`different_basis`).
+- **The verifier** (`scripts/lib/freight-verify.mjs`,
+  `verify-freight-catalog.mjs`):
+  - It obeys robots.txt as RFC 9309 defines it, including Crawl-delay.
+  - A figure that changed at the source is red, and the report names the capture
+    date, the read date and the day the change was first seen.
+  - A state read or write that fails is red.
+  - It fetches each source once per run.
+- **The table.** `20260917b_freight_verification.sql` was applied through
+  `apply-migrations.yml`. The live anonymous read went from 404 to 200.
+
+### Guard
+
+- **`test:freight-catalog`** refuses a row that has:
+  - no `sourceUrl` and no `unsourced` reason;
+  - a source off the make's own domains (`MAKER_DOMAINS`), so a dealer site,
+    sticker service or marketplace fails the build;
+  - no model year or `covers`;
+  - a duplicate (make, model, year);
+  - `parts` that do not add up.
+
+  It also pins:
+  - robots.txt handling (2xx rules, 4xx means no file, 5xx means disallow);
+  - reading by field name, by label and by model path, where a sibling model's
+    figure can never confirm this one;
+  - the dated change note, including a carried-forward first-seen date;
+  - drift is red.
+- **`test:freight-line`** pins two cases:
+  - A Porsche destination figure is `different_basis` and never raises point 03.
+  - A 2027 Atlas at VW's 2027 figure is `compared`, the same charge on a 2026
+    reads $200 above, and a year we hold nothing for is not compared.
+- **The live proof:** `verify-freight-catalog.mjs --dry-run` on the committed
+  catalogue returned 279 confirmed, 0 changed, 1 blocked (Volvo's 403), and 2
+  unsourced.
+
 ## 2026-09-24 — one car, counted once per dealer site in every aggregate
 
 **Shapes:** One-surface fix · A check run at the wrong moment

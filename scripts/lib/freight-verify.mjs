@@ -29,17 +29,40 @@
 // declining an identified client is their decision; it is recorded as `blocked`
 // and counted, never routed around. [[dealer-tos-daily-checks]]
 
+import { parseRobots, isPathAllowed } from "./robots.mjs";
+
 // Every status that means THE FIGURE WAS NOT RE-READ, whatever the cause, ours
 // or theirs. It is one list because the caller's refusal threshold has to count
 // all of them: splitting a status without adding it here is how a threshold gets
 // silently loosened by a refactor.
-export const NOT_READ = ["unreachable", "blocked", "dead_link", "bad_url", "no_source"];
+export const NOT_READ = ["unreachable", "blocked", "dead_link", "bad_url", "no_source", "robots_disallowed", "robots_unreachable"];
 
 export const STATUS_NOTE = {
   bad_url: "the stored row carries no usable source URL, so there is nothing to re-read",
   no_source: "the stored row names no source at all",
   unreachable: "we could not reach the manufacturer's page; the stored figure is unchanged and unverified",
+  robots_disallowed: "the manufacturer's robots.txt disallows this path for our agent, so we did not fetch it. Their decision; the stored figure is unchanged and unverified.",
+  robots_unreachable: "the manufacturer's robots.txt could not be fetched (server error or no answer), which RFC 9309 treats as a full disallow, so we did not fetch the page. The stored figure is unchanged and unverified.",
 };
+
+// ── robots.txt, the way RFC 9309 defines honouring it ───────────────────────
+// 2xx: obey the rules for our agent. 4xx: the file is "unavailable" and the
+// crawler MAY access anything (§2.3.1.3) -- Mazda's API gateway answers 403 for
+// every unknown path, robots.txt included. 5xx or no answer: "unreachable",
+// which MUST be read as a complete disallow (§2.3.1.4). The inventory crawl is
+// stricter (only a 404 counts as "no file") because it reads dealers' sites
+// under a legal hold; this job reads manufacturers' own published figures, once
+// a day, one request per figure, and the standard is the bar.
+export function robotsVerdict(status, text, path) {
+  const s = Number(status) || 0;
+  if (s >= 200 && s < 300) {
+    // Crawl-delay rides along: Stellantis's newsroom asks for 20 seconds.
+    const rules = parseRobots(text, "lotcheckbot");
+    return isPathAllowed(rules, path) ? { ok: true, crawlDelay: rules.crawlDelay ?? null } : { ok: false, status: "robots_disallowed" };
+  }
+  if (s >= 400 && s < 500) return { ok: true };
+  return { ok: false, status: "robots_unreachable" };
+}
 
 /** A source URL we can actually fetch, or the reason we cannot. */
 export function sourceUrlOf(raw) {
@@ -53,14 +76,21 @@ export function sourceUrlOf(raw) {
 // Four digits minimum: freight is never a two-digit number, and matching small
 // figures would pull in A/C charges ($100) and tire levies ($20) as if they were
 // freight.
-const MONEY = /(?:CA)?\$\s?([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})(?:\.[0-9]{2})?/g;
+//
+// Nissan Canada's own releases sometimes drop the dollar sign ("Selling Price
+// includes CA2,095 freight and PDI"), so a bare CA counts too -- but only in
+// front of a comma-grouped figure, so "CA2026" never reads as money. Maserati
+// prints "CAD 2,200".
+const MONEY = /(?:CAD\s?|CA\$|CA(?=\d{1,3},\d{3})|\$)\s?([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{4,6})(?:\.[0-9]{2})?/g;
 
 // The words a maker prints around this charge. Deliberately broad on the label
 // (every maker words it differently) and narrow on the distance to the figure.
 const FREIGHT_WORDS = /(freight|destination|delivery and destination|pre[- ]?delivery|\bPDI\b|transport(ation)?\s+charge)/i;
 
 export function moneyNear(text, { within = 160 } = {}) {
-  const t = String(text || "").replace(/\s+/g, " ");
+  // Markup is not text: Polestar prints "$<strong>2,800</strong> Freight and
+  // PDI", and the tag between the sign and the digits hid the figure.
+  const t = String(text || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
   const out = [];
   let m;
   const re = new RegExp(FREIGHT_WORDS.source, "gi");
@@ -78,19 +108,203 @@ export function moneyNear(text, { within = 160 } = {}) {
   return [...new Set(out)];
 }
 
+// ── Reading a maker's JSON rather than guessing at its page ─────────────────
+// A configurator page is usually an empty shell that JavaScript fills in, so a
+// plain GET reads nothing and the row sits at not_stated forever. The same
+// numbers arrive as JSON from the maker's own API, where they carry a NAME:
+// Hyundai's `delivery`, Mazda's {"title":"Freight","price":1455}. Reading the
+// name is exact; reading "a dollar figure near the word freight" is not. [PR #504]
+
+const num = (v) => {
+  const n = typeof v === "number" ? v : Number(String(v ?? "").replace(/[$,\s]/g, ""));
+  return Number.isFinite(n) ? n : null;
+};
+
+function walk(node, visit) {
+  if (Array.isArray(node)) { for (const x of node) walk(x, visit); return; }
+  if (node && typeof node === "object") { visit(node); for (const v of Object.values(node)) walk(v, visit); }
+}
+
+/** Every number held under a property called `key` (any depth, any case). */
+export function numbersAtKey(json, key) {
+  const want = String(key).toLowerCase();
+  const out = [];
+  walk(json, (o) => {
+    for (const [k, v] of Object.entries(o)) {
+      if (k.toLowerCase() !== want) continue;
+      const n = num(v);
+      if (n !== null && n > 0) out.push(n);
+    }
+  });
+  return [...new Set(out)];
+}
+
+/** Line items shaped {title|name|label, price|amount|value}, by their label. */
+export function amountsByLabel(json, labels) {
+  const out = Object.fromEntries(Object.keys(labels).map((k) => [k, []]));
+  walk(json, (o) => {
+    const name = String(o.title ?? o.name ?? o.label ?? "").trim().toLowerCase();
+    if (!name) return;
+    const n = num(o.price ?? o.amount ?? o.value);
+    if (n === null) return;
+    for (const [part, label] of Object.entries(labels)) {
+      if (name === String(label).toLowerCase() && !out[part].includes(n)) out[part].push(n);
+    }
+  });
+  return out;
+}
+
+// A data block a page carries inside its HTML: Infiniti's hidden
+// <iframe id="individualVehiclePriceJSON">, Kia's HTML-escaped `"models":[...]`
+// arrays (fourteen of them on one build-and-price page, one per model family).
+// Returns EVERY block after every occurrence of the marker that parses, so a
+// path starts with "*" to walk them; [] when none does.
+export function embeddedJson(html, marker, { unescape = false } = {}) {
+  let h = String(html || "").replace(/&#34;|&quot;/g, '"').replace(/&amp;/g, "&");
+  // Ford ships its data as a JavaScript string: "[{"model":"E-Transit..."
+  if (unescape) {
+    h = h.replace(/\\x([0-9a-fA-F]{2})/g, (_, x) => String.fromCharCode(parseInt(x, 16)))
+      .replace(/\\u([0-9a-fA-F]{4})/g, (_, x) => String.fromCharCode(parseInt(x, 16)));
+  }
+  const out = [];
+  for (let at = h.indexOf(marker); at >= 0; at = h.indexOf(marker, at + 1)) {
+    const rel = h.slice(at + marker.length - 1).search(/[{[]/);
+    if (rel < 0) break;
+    const open = at + marker.length - 1 + rel;
+    const close = matchBracket(h, open);
+    if (close < 0) continue;
+    try { out.push(JSON.parse(h.slice(open, close + 1))); } catch { /* not a clean block here */ }
+  }
+  return out;
+}
+
+function matchBracket(s, open) {
+  const oc = s[open], cc = oc === "[" ? "]" : "}";
+  let depth = 0, inStr = false, esc = false;
+  for (let i = open; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true;
+    else if (c === oc) depth++;
+    else if (c === cc && --depth === 0) return i;
+  }
+  return -1;
+}
+
+// One step down a path, over every node reached so far:
+//   "name"            that property
+//   "*"               every element of an array / value of an object
+//   "model=K4&year=2026"  the array elements whose fields all equal these
+function stepInto(nodes, step) {
+  if (step === "*") {
+    return nodes.flatMap((n) => (Array.isArray(n) ? n : n && typeof n === "object" ? Object.values(n) : []));
+  }
+  if (step.includes("=")) {
+    const conds = step.split("&").map((c) => c.split("="));
+    const hit = (el) => el && typeof el === "object" && conds.every(([k, v]) => String(el[k]) === v);
+    return nodes.flatMap((n) => (Array.isArray(n) ? n.filter(hit) : hit(n) ? [n] : []));
+  }
+  return nodes.map((n) => n?.[step]).filter((v) => v !== undefined);
+}
+
+// "PDI Charge $250, freight $1,875" -- a maker that prints its two lines in
+// prose (Mitsubishi Canada's price guides). Each label must sit directly in
+// front of its own dollar figure.
+export function labelsInText(text, labels) {
+  const t = String(text || "").replace(/\s+/g, " ");
+  const out = {};
+  for (const [part, label] of Object.entries(labels)) {
+    const esc = String(label).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`${esc}\\s*(?:of|:)?\\s*\\$\\s?([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)(?:\\.[0-9]{2})?`, "gi");
+    out[part] = [...new Set([...t.matchAll(re)].map((m) => Number(m[1].replace(/,/g, ""))))];
+  }
+  return out;
+}
+
+// Rivian's builder serialises its data as a flat list of key, value, key,
+// value -- "destinationFee",2695,"docFee",300 -- so the figure is simply the
+// number that follows the name.
+export function numbersAfter(text, marker) {
+  const esc = String(marker).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`${esc}[^0-9A-Za-z]{0,6}([0-9]+(?:\\.[0-9]+)?)`, "g");
+  return [...new Set([...String(text || "").matchAll(re)].map((m) => Number(m[1])))];
+}
+
 /**
- * Compare one catalogue row against the page it cites.
+ * What the source states, read the way the row says to read it.
+ *   read.embedded  a data block inside an HTML page, found by a marker
+ *   read.path      steps down the JSON to THIS model (see stepInto). VW, Kia
+ *                  and Toyota each answer every model in one response; the
+ *                  path is what binds a figure to its own model and year
+ *   read.key       numbers under that property name
+ *   read.labels    {part: label} line items, for a maker that itemises freight
+ *                  and PDI as two numbers (with read.text: in prose, not JSON)
+ *   read.after     the number that follows a field name in serialised data
+ *   read.unescape  the embedded block is a JavaScript string (" for ")
+ *   (none)         dollar figures printed near freight/destination/PDI wording
+ * Returns { seen } or { parts } or { error }.
+ */
+export function figuresIn(body, read = {}) {
+  if (read.labels && read.text) return { parts: labelsInText(body, read.labels) };
+  if (read.after) return { seen: numbersAfter(body, read.after).filter((n) => n >= 900 && n <= 9000) };
+  if (!read.path && !read.key && !read.labels && !read.embedded) return { seen: moneyNear(body) };
+  let root;
+  if (read.embedded) {
+    root = embeddedJson(body, read.embedded, { unescape: read.unescape === true });
+    if (!root.length) return { error: `the page no longer carries its "${read.embedded}" data block; the stored amount is unchanged and unverified` };
+  } else {
+    try { root = typeof body === "string" ? JSON.parse(body) : body; }
+    catch { return { error: "the source did not answer JSON, so the named field could not be read; the stored amount is unchanged and unverified" }; }
+  }
+  let nodes = [root];
+  for (const step of read.path || []) {
+    nodes = stepInto(nodes, step);
+    if (!nodes.length) {
+      return { error: `the maker's response no longer carries "${(read.path || []).join(" > ")}" -- the model may have left the offer or the feed; nothing is known about its freight and the stored amount is unchanged and unverified` };
+    }
+  }
+  if (read.key) {
+    return { seen: [...new Set(nodes.flatMap((n) => numbersAtKey(n, read.key)))].filter((n) => n >= 900 && n <= 9000) };
+  }
+  if (read.labels) {
+    const parts = Object.fromEntries(Object.keys(read.labels).map((k) => [k, []]));
+    for (const n of nodes) {
+      for (const [k, v] of Object.entries(amountsByLabel(n, read.labels))) for (const x of v) if (!parts[k].includes(x)) parts[k].push(x);
+    }
+    return { parts };
+  }
+  return { seen: [...new Set(nodes.flatMap((n) => moneyNear(typeof n === "string" ? n : JSON.stringify(n))))] };
+}
+
+const $ = (n) => "$" + Number(n).toLocaleString("en-CA");
+
+// THE DATE A CHANGE WAS FIRST SEEN travels in the stored note, so a figure that
+// moved three weeks ago does not read as news every morning, and one that moved
+// today is not buried under yesterday's.
+const FIRST_READ = /first read (\d{4}-\d{2}-\d{2})/;
+
+/**
+ * Compare one catalogue row against the source it cites.
  *
  * Returns { status, seen, note }:
- *   confirmed   the page states the amount we hold
- *   drifted     the page states a DIFFERENT freight figure
- *   not_stated  the page loaded but names no freight figure at all -- which is
+ *   confirmed   the source states the amount we hold
+ *   drifted     the source states a DIFFERENT freight figure -- a CHANGE since
+ *               the day we captured ours, and the note carries both dates
+ *   not_stated  the source loaded but names no freight figure we could read --
  *               NOT evidence the charge changed, only that we did not read it
- *   blocked / dead_link / unreachable / bad_url / no_source  -- see NOT_READ
+ *   blocked / dead_link / unreachable / bad_url / no_source / robots_*  -- see NOT_READ
+ *
+ * `opts.today` is the read date; `opts.previous` is the stored result for this
+ * row ({status, note}), which is where a change's first-seen date comes from.
  */
-export function verifyRow(row, page, http = null) {
-  const src = sourceUrlOf(row?.source_url ?? row?.url);
-  if (!src.url) return { status: src.why, seen: [], note: STATUS_NOTE[src.why] };
+export function verifyRow(row, page, http = null, opts = {}) {
+  const src = sourceUrlOf(row?.source_url ?? row?.sourceUrl ?? row?.url);
+  if (!src.url) {
+    // A row we could not source says WHY, in the catalogue; that reason is the
+    // note, so the backlog is a list of answered questions, not blanks.
+    const why = row?.unsourced ? `unsourced: ${row.unsourced}` : STATUS_NOTE[src.why];
+    return { status: src.why, seen: [], note: why };
+  }
 
   if (page == null) {
     const code = Number(http) || 0;
@@ -109,7 +323,26 @@ export function verifyRow(row, page, http = null) {
     return { status: "unreachable", seen: [], note: STATUS_NOTE.unreachable };
   }
 
-  const seen = moneyNear(page);
+  const got = figuresIn(page, row?.read || {});
+  if (got.error) return { status: "not_stated", seen: [], note: got.error };
+
+  // Itemised makers: each published line is checked against its own number. We
+  // never compare our bundle to a figure the maker did not print.
+  if (row?.parts && got.parts) {
+    const p = got.parts;
+    const seen = Object.values(p).flat();
+    if (Object.values(p).some((list) => !list.length)) {
+      return { status: "not_stated", seen, note: "the maker's response no longer itemises both freight and PDI; the stored amounts are unchanged and unverified" };
+    }
+    const statedText = Object.entries(p).map(([k, v]) => `${k} ${v.map($).join("/")}`).join(" + ");
+    if (Object.keys(row.parts).every((k) => (p[k] || []).includes(Number(row.parts[k])))) {
+      return { status: "confirmed", seen, note: `the source states ${statedText}` };
+    }
+    const heldText = Object.entries(row.parts).map(([k, v]) => `${k} ${$(v)}`).join(" + ");
+    return driftNote(row, heldText, statedText, seen, opts);
+  }
+
+  const seen = got.seen || [];
   if (!seen.length) {
     // A SHELL IS NOT A FINDING. A page that loaded but states no freight figure
     // anywhere is evidence we did not read the charge, not that the maker
@@ -122,39 +355,51 @@ export function verifyRow(row, page, http = null) {
   }
 
   const want = Number(row?.amount);
-  if (seen.includes(want)) {
-    return { status: "confirmed", seen, note: `the page states $${want.toLocaleString("en-CA")}` };
-  }
+  if (seen.includes(want)) return { status: "confirmed", seen, note: `the source states ${$(want)}` };
+  return driftNote(row, $(want), seen.map($).join(" / "), seen, opts);
+}
+
+function driftNote(row, heldText, statedText, seen, { today = new Date().toISOString().slice(0, 10), previous } = {}) {
+  const prevFirst = previous?.status === "drifted" ? FIRST_READ.exec(String(previous.note || ""))?.[1] : null;
+  const first = prevFirst || today;
   return {
-    status: "drifted", seen,
-    note: `we hold $${want.toLocaleString("en-CA")}; the page states ${seen.map((n) => "$" + n.toLocaleString("en-CA")).join(" / ")}. Re-read the source and update the row by hand -- this job never rewrites a figure.`,
+    status: "drifted", seen, firstSeen: first,
+    note: `CHANGED: we hold ${heldText}, captured ${row?.capturedOn || "on an unrecorded date"}; `
+      + `on ${today} the source states ${statedText} -- first read ${first}. `
+      + `Re-read the source and update the row by hand -- this job never rewrites a figure.`,
   };
 }
 
+const statusOf = (p) => (typeof p === "string" ? p : p?.status);
+
 /**
- * Which drift is worth a red run.
+ * Which results make the run red.
  *
- * Only a make we have CONFIRMED before and can no longer confirm. A make that
- * has never been confirmed is a gap in the matcher, not a finding about the
- * manufacturer -- reported loudly every run, and fixed by improving the read.
- * Copied deliberately from warranty-verify, which learned it the hard way: a
- * first probe called three of six makes "drifted" and all three were the
- * flattening of a table, not a change of terms.
+ * A CHANGE IS RED. Every row with a sourceUrl was read off that exact source on
+ * its capturedOn date, so a source that now states a different figure is a
+ * change since that date -- not a matcher gap to report in amber and scroll
+ * past. That is what this job is for: freight rising quietly is the move nobody
+ * announces. It is safe to make red because each source is read by the maker's
+ * own field name, or bound to its model by a JSON path, and every one was
+ * confirmed by this job before it was committed; a page that loads but says
+ * nothing is `not_stated`, never drift. (Until 2026-09-24 drift was red only
+ * against a previous confirmed state held in freight_verification -- a table
+ * that did not exist in production, so the red path could never fire.)
+ *
+ * `regressed` still names the rows confirmed on a previous run, so the report
+ * can say "this agreed last time".
  */
 export function assess(results, { previous = {} } = {}) {
-  // A ROW WITH NO URL AND A ROW THAT REFUSED TO LOAD ARE DIFFERENT PROBLEMS, and
-  // counting them together would make this job red on the day it was written --
-  // the eleven figures the catalogue already held name a source in prose, not a
-  // link, so none of them can be re-read at all. That is a backlog of ours, and
-  // it is reported every run with its own count. A threshold that fires on
-  // healthy data the first time it runs gets switched off before it ever catches
-  // anything real, so the refusal below is measured only over the rows that
-  // actually had a page to fetch.
+  // A ROW WITH NO URL AND A ROW THAT REFUSED TO LOAD ARE DIFFERENT PROBLEMS.
+  // Rows we could not source are a named backlog (each says why, in the
+  // catalogue); the refusal threshold is measured only over rows that actually
+  // had a page to fetch, because a guard that fires on healthy data the first
+  // time it runs gets switched off before it catches anything real.
   const noSource = results.filter((r) => r.status === "no_source" || r.status === "bad_url");
   const attempted = results.filter((r) => !noSource.includes(r));
   const failedToRead = attempted.filter((r) => NOT_READ.includes(r.status));
   const drifted = results.filter((r) => r.status === "drifted");
-  const regressed = drifted.filter((d) => previous[d.key] === "confirmed");
+  const regressed = drifted.filter((d) => statusOf(previous[d.key]) === "confirmed");
   const confirmed = results.filter((r) => r.status === "confirmed");
 
   // Of the figures we could have checked, did we check most of them? With most
@@ -164,14 +409,13 @@ export function assess(results, { previous = {} } = {}) {
   return {
     confirmed: confirmed.length,
     drifted: drifted.length,
+    changed: drifted,
     regressed,
     noSource: noSource.length,
     attempted: attempted.length,
     failedToRead: failedToRead.length,
     total: results.length,
     mostlyUnread,
-    // A figure that WAS confirmed and no longer is, is a real change in the
-    // world. Everything else is reported and stays amber.
-    red: regressed.length > 0 || mostlyUnread,
+    red: drifted.length > 0 || mostlyUnread,
   };
 }
