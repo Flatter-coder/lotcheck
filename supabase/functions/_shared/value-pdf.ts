@@ -34,37 +34,21 @@ function guillocheRings(seed: number, cx: number, cy: number, R: number, steps: 
   const ring = (scale: number, off: number) => { let d = ""; const n = steps; for (let i = 0; i <= n; i++) { const t = i / n * 6.28318; const rr = R * scale + a1 * Math.sin(petal * t + ph) + a2 * Math.sin(fine * t); const x = cx + (rr + off) * Math.cos(t), y = cy + (rr + off) * Math.sin(t); d += (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1) + " "; } return d; };
   return [ring(1, 0), ring(1, 2.4), ring(0.66, 0), ring(0.66, 1.9)];
 }
-const LOGO_POLYS: [string, [number, number, number]][] = [
-  ["M0 -36 L170 49 L30 119 L-140 34Z",[0.7216,0.8706,0.7216]],
-  ["M-140 48 L30 133 L30 119 L-140 34Z",[0.6275,0.7961,0.6275]],
-  ["M170 63 L30 133 L30 119 L170 49Z",[0.5333,0.6745,0.5333]],
-  ["M-50 5 L100 80 L52 104 L-98 29Z",[0.851,0.8588,0.9373]],
-  ["M-4 -26 L8 -20 L-4 -14 L-16 -20Z",[0.7137,0.6706,0.8941]],
-  ["M-16 22 L-4 28 L-4 -14 L-16 -20Z",[0.6196,0.5686,0.8235]],
-  ["M8 22 L-4 28 L-4 -14 L8 -20Z",[0.5294,0.4863,0.702]],
-  ["M-72 8 L-60 14 L-72 20 L-84 14Z",[0.7137,0.6706,0.8941]],
-  ["M-84 56 L-72 62 L-72 20 L-84 14Z",[0.6196,0.5686,0.8235]],
-  ["M-60 56 L-72 62 L-72 20 L-60 14Z",[0.5294,0.4863,0.702]],
-  ["M1 -38.5 L11 -33.5 L-77 10.5 L-87 5.5Z",[0.7608,0.7216,0.9216]],
-  ["M-87 16.5 L-77 21.5 L-77 10.5 L-87 5.5Z",[0.6745,0.6275,0.8549]],
-  ["M11 -22.5 L-77 21.5 L-77 10.5 L11 -33.5Z",[0.5725,0.5333,0.7255]],
-  ["M6 17 L-82 61 L-82 17 L6 -27Z",[0.8018,0.8968,0.8544]],
-  ["M-13 33.5 L40 60 L13 73.5 L-40 47Z",[0.8984,0.8873,0.8678]],
-  ["M-12 25 L34 48 L12 59 L-34 36Z",[0.9569,0.5882,0.5098]],
-  ["M-34 44 L12 67 L12 59 L-34 36Z",[0.8902,0.4824,0.3922]],
-  ["M34 56 L12 67 L12 59 L34 48Z",[0.7569,0.4078,0.3333]],
-  ["M-5 23.5 L17 34.5 L1 42.5 L-21 31.5Z",[0.9569,0.5882,0.5098]],
-  ["M-21 39.5 L1 50.5 L1 42.5 L-21 31.5Z",[0.8902,0.4824,0.3922]],
-  ["M17 42.5 L1 50.5 L1 42.5 L17 34.5Z",[0.7569,0.4078,0.3333]],
-  ["M17 42.5 L1 50.5 L1 43.5 L17 35.5Z",[0.902,0.9569,0.9647]],
-  ["M-18 40 L-1 48.5 L-1 43.5 L-18 35Z",[0.8667,0.9294,0.949]],
-  ["M-25 43.5 L-18 47 L-22 49 L-29 45.5Z",[0.3843,0.3647,0.5098]],
-  ["M-29 50.5 L-22 54 L-22 49 L-29 45.5Z",[0.251,0.2314,0.3922]],
-  ["M-18 52 L-22 54 L-22 49 L-18 47Z",[0.2157,0.1961,0.3333]],
-  ["M1 56.5 L8 60 L4 62 L-3 58.5Z",[0.3843,0.3647,0.5098]],
-  ["M-3 63.5 L4 67 L4 62 L-3 58.5Z",[0.251,0.2314,0.3922]],
-  ["M8 65 L4 67 L4 62 L8 60Z",[0.2157,0.1961,0.3333]],
-  ["M30 55 L25 57.5 L25 54.5 L30 52Z",[1,0.9529,0.7882]],
+// ---- BRAND MARK ---- the 07b "Sticker + Scan" mark (2026-09-24): the window
+// sticker (the quote), the scan line across it, the stamp that says checked.
+// Same 64-unit geometry as the site's SVG and the app icons, flattened to
+// straight-edged polygons because drawSvgPath inverts arc sweep with its
+// y-flip. An entry with a third value is a stroke of that width; the rest are
+// fills, pre-composited over white paper.
+const LOGO_SHAPES: [string, [number, number, number], number?][] = [
+  ["M45 4 L46.81 4.24 L48.5 4.94 L49.95 6.05 L51.06 7.5 L51.76 9.19 L52 11 L52 53 L51.76 54.81 L51.06 56.5 L49.95 57.95 L48.5 59.06 L46.81 59.76 L45 60 L15 60 L13.19 59.76 L11.5 59.06 L10.05 57.95 L8.94 56.5 L8.24 54.81 L8 53 L8 11 L8.24 9.19 L8.94 7.5 L10.05 6.05 L11.5 4.94 L13.19 4.24 L15 4Z",[0.0431,0.1059,0.2471]],
+  ["M45 8 L45.78 8.1 L46.5 8.4 L47.12 8.88 L47.6 9.5 L47.9 10.22 L48 11 L48 53 L47.9 53.78 L47.6 54.5 L47.12 55.12 L46.5 55.6 L45.78 55.9 L45 56 L15 56 L14.22 55.9 L13.5 55.6 L12.88 55.12 L12.4 54.5 L12.1 53.78 L12 53 L12 11 L12.1 10.22 L12.4 9.5 L12.88 8.88 L13.5 8.4 L14.22 8.1 L15 8Z",[1,1,1]],
+  ["M12 8 L48 8 L48 18 L12 18Z",[0.0431,0.1059,0.2471]],
+  ["M36.1 24 L37.05 24.25 L37.75 24.95 L38 25.9 L38 25.9 L37.75 26.85 L37.05 27.55 L36.1 27.8 L17.9 27.8 L16.95 27.55 L16.25 26.85 L16 25.9 L16 25.9 L16.25 24.95 L16.95 24.25 L17.9 24Z",[0.3302,0.3741,0.473]],
+  ["M58.5 31 L59.75 31.33 L60.67 32.25 L61 33.5 L61 33.5 L60.67 34.75 L59.75 35.67 L58.5 36 L5.5 36 L4.25 35.67 L3.33 34.75 L3 33.5 L3 33.5 L3.33 32.25 L4.25 31.33 L5.5 31Z",[0.1137,0.4196,1]],
+  ["M57.5 47 L57.29 49.34 L56.69 51.62 L55.69 53.75 L54.34 55.68 L52.68 57.34 L50.75 58.69 L48.62 59.69 L46.34 60.29 L44 60.5 L41.66 60.29 L39.38 59.69 L37.25 58.69 L35.32 57.34 L33.66 55.68 L32.31 53.75 L31.31 51.62 L30.71 49.34 L30.5 47 L30.71 44.66 L31.31 42.38 L32.31 40.25 L33.66 38.32 L35.32 36.66 L37.25 35.31 L39.38 34.31 L41.66 33.71 L44 33.5 L46.34 33.71 L48.62 34.31 L50.75 35.31 L52.68 36.66 L54.34 38.32 L55.69 40.25 L56.69 42.38 L57.29 44.66Z",[1,1,1]],
+  ["M54.5 47 L54.34 48.82 L53.87 50.59 L53.09 52.25 L52.04 53.75 L50.75 55.04 L49.25 56.09 L47.59 56.87 L45.82 57.34 L44 57.5 L42.18 57.34 L40.41 56.87 L38.75 56.09 L37.25 55.04 L35.96 53.75 L34.91 52.25 L34.13 50.59 L33.66 48.82 L33.5 47 L33.66 45.18 L34.13 43.41 L34.91 41.75 L35.96 40.25 L37.25 38.96 L38.75 37.91 L40.41 37.13 L42.18 36.66 L44 36.5 L45.82 36.66 L47.59 37.13 L49.25 37.91 L50.75 38.96 L52.04 40.25 L53.09 41.75 L53.87 43.41 L54.34 45.18Z",[0.1137,0.4196,1]],
+  ["M38.48 47.48 L42.68 51.68 L50.12 44.24",[1,1,1],3.72],
 ];
 
 // ---- the value-report page ----
@@ -126,8 +110,15 @@ export async function buildValuePdf(a: any, verifyUrl?: string): Promise<Uint8Ar
   const kicker = (str: string, col = TEAL) => { need(20); T(str, { size: 8.5, font: sansB, color: col }); y -= 15; };
 
   const drawLogo = (x0: number, yTop: number, w: number) => {
-    const s = w / 320, ax = x0 + 145 * s, ay = yTop - 44 * s;
-    for (const [path, c] of LOGO_POLYS) page.drawSvgPath(path, { x: ax, y: ay, scale: s, color: rgb(c[0], c[1], c[2]) });
+    // Callers size the box by width (the old mark was 320x182). The new mark is
+    // square, so it fills that box's HEIGHT and sits centred in its width --
+    // every existing call site keeps its footprint and alignment.
+    const S = w * 182 / 320, s = S / 64, ax = x0 + (w - S) / 2;
+    for (const [path, c, sw] of LOGO_SHAPES) {
+      page.drawSvgPath(path, sw
+        ? { x: ax, y: yTop, scale: s, borderColor: rgb(c[0], c[1], c[2]), borderWidth: sw, borderLineCap: 1 }
+        : { x: ax, y: yTop, scale: s, color: rgb(c[0], c[1], c[2]) });
+    }
   };
   const SEALSEED = sealSeed(a.sig || RID);
   const drawSeal = (cxAbs: number, cyCentre: number, S: number) => {
