@@ -67,7 +67,11 @@ export function canonicalReport(a: any): any {
     // v11 (2026-09-03): a missing odometer now seals as null, where it used to
     // seal as 0 and print "Odometer 0 km" on /verify. Not additive, so it gets
     // a version the way the v7 projection change did.
-    v: 14,
+    // v15 (2026-09-24): marketValue.rows -- the listings behind the market
+    // figures (price, km, year, trim, city, dealer, read date), up to seven,
+    // so the report's compare and shortlist pages print sealed rows and /verify
+    // can show the same ones. Additive.
+    v: 15,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: resolvePriceVerified(a).sourceVerified },
@@ -84,7 +88,7 @@ export function canonicalReport(a: any): any {
     // v6 (2026-09-02): the comparison's BASIS rides with it (year window, trim
     // scope, powertrain, mileage window, condition, dealers) and an insufficient
     // set is sealed as such (ins/nr/nd) so /verify says "not enough" too.
-    marketValue: a.marketValue ? { avg: nn(a.marketValue.average), below: nn(a.marketValue.below), above: nn(a.marketValue.above), lo: nn(a.marketValue.low), hi: nn(a.marketValue.high), mileage: nn(a.marketValue.mileage), source: a.marketValue.source || null, n: nn(a.marketValue.comps), as: a.marketValue.asOf || null, ins: !!a.marketValue.insufficient, nr: nn(a.marketValue.nRead), nd: nn(a.marketValue.need), yf: nn(a.marketValue.yearFrom), yt: nn(a.marketValue.yearTo), ts: a.marketValue.trimScope || null, tl: a.marketValue.trimLabel || null, pt: a.marketValue.powertrain || null, kl: nn(a.marketValue.kmLow), kh: nn(a.marketValue.kmHigh), cd: a.marketValue.condition || null, d: nn(a.marketValue.dealers), nk: nn(a.marketValue.nKept), mk: a.marketValue.make || null, md: a.marketValue.model || null, pv: a.marketValue.province || null, from: a.marketValue.seenMin || null, to: a.marketValue.seenMax || null, rs: a.marketValue.reason || null } : null,
+    marketValue: a.marketValue ? { avg: nn(a.marketValue.average), below: nn(a.marketValue.below), above: nn(a.marketValue.above), lo: nn(a.marketValue.low), hi: nn(a.marketValue.high), mileage: nn(a.marketValue.mileage), source: a.marketValue.source || null, n: nn(a.marketValue.comps), as: a.marketValue.asOf || null, ins: !!a.marketValue.insufficient, nr: nn(a.marketValue.nRead), nd: nn(a.marketValue.need), yf: nn(a.marketValue.yearFrom), yt: nn(a.marketValue.yearTo), ts: a.marketValue.trimScope || null, tl: a.marketValue.trimLabel || null, pt: a.marketValue.powertrain || null, kl: nn(a.marketValue.kmLow), kh: nn(a.marketValue.kmHigh), cd: a.marketValue.condition || null, d: nn(a.marketValue.dealers), nk: nn(a.marketValue.nKept), mk: a.marketValue.make || null, md: a.marketValue.model || null, pv: a.marketValue.province || null, from: a.marketValue.seenMin || null, to: a.marketValue.seenMax || null, rs: a.marketValue.reason || null, rows: (a.marketValue.sample || []).map((r: any) => ({ p: nn(r.price), k: nn(r.km), y: nn(r.year), t: r.trim || null, c: r.city || null, d: r.dealer || null, s: r.asOf || null })) } : null,
     summary: a.summary || null,
     // #14 photo proof lock: the listing screenshot's SHA-256 rides INSIDE the
     // signed canonical -- alter the image and the seal breaks.

@@ -111,7 +111,7 @@ check("a schema.org ImageObject is read through to its url",
   const c = canonicalReport({ vehiclePhotoUrl: CAR, vehiclePhotoVin: VIN, vin: VIN, quotedPrice: 1 });
   check("the photo is SEALED into the canonical as `ph`",
     !!c.ph && c.ph.u === CAR && c.ph.vin === VIN, JSON.stringify(c.ph));
-  check("the canonical is at the version that seals it", c.v === 14, String(c.v));
+  check("the canonical is at the version that seals it", c.v === 15, String(c.v));
   check("a photo with no VIN seals as null, never as a bare URL",
     canonicalReport({ vehiclePhotoUrl: CAR, quotedPrice: 1 }).ph === null);
 }
