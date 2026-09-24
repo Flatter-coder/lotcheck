@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-09-03g";
+const PDF_BUILDER_VER = "2026-09-24a";  // 24a: the Hub & Spoke redesign -- page 1 is thirteen cards around the car, page 2 the summary and thank-you; the full detail follows unchanged.
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -873,7 +873,8 @@ import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
 import { reportBands } from "../_shared/report-bands.js";
-import { recallDigest, recallsShownNote, warrantyLine, dealerLicenceLine, priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, fmtDateEn } from "../_shared/report-lines.js";
+import { reportCards, cardTally } from "../_shared/report-cards.js";
+import { recallDigest, recallsShownNote, warrantyLine, dealerLicenceLine, priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, fmtDateEn, fmtMoney } from "../_shared/report-lines.js";
 import { brandedTitleLine } from "../_shared/branded-title.js";
 import { lotDateLines } from "../_shared/lot-dates.js";
 
@@ -1464,6 +1465,470 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   const msrpExact = ms > 0 && a.msrpBasis === "exact";
 
   // ---- MASTHEAD ----
+  // ════════════════════════════════════════════════════════════════════════
+  // THE REDESIGN (2026-09-24, "Hub & Spoke"). Page 1 is thirteen cards around
+  // the car; the summary and thank-you page follows it; then the full detail
+  // below, every section it always had. Every state, value and word on these
+  // pages comes from reportCards() -- this block only draws.
+  // [[one-report-new-and-used]] [[traffic-column-report-direction]]
+  // ════════════════════════════════════════════════════════════════════════
+  let heroImg: any = null;
+  if (vehiclePhoto) {
+    try {
+      heroImg = vehiclePhoto.kind === "png" ? await doc.embedPng(vehiclePhoto.bytes) : await doc.embedJpg(vehiclePhoto.bytes);
+    } catch (e) {
+      console.warn("Vehicle photo embed failed:", (e as Error)?.message);
+      heroImg = null;
+    }
+  }
+  {
+    const cards = reportCards(a);
+    const tally = cardTally(cards);
+    const HM = 30, CW = PW - HM * 2;
+    const NAVY = rgb(0.043, 0.106, 0.247), BLUE = rgb(0.114, 0.420, 1), CARD = rgb(0.055, 0.114, 0.251);
+    const WHITE = rgb(1, 1, 1), MUTE = rgb(0.765, 0.804, 0.878), CYAN = rgb(0.361, 0.784, 1), HATCH = rgb(0.165, 0.227, 0.357);
+    const DK: any = { raise: rgb(1, 0.420, 0.341), clear: rgb(0.243, 0.878, 0.561), noted: rgb(0.706, 0.737, 0.796), unchecked: rgb(0.549, 0.584, 0.659) };
+    const LT: any = { raise: rgb(0.678, 0.192, 0.098), clear: rgb(0.086, 0.420, 0.314), noted: rgb(0.435, 0.420, 0.388), unchecked: rgb(0.435, 0.420, 0.388) };
+    const LTBG: any = { raise: rgb(0.984, 0.925, 0.910), clear: rgb(0.906, 0.953, 0.933), noted: rgb(0.945, 0.941, 0.933), unchecked: rgb(0.957, 0.957, 0.949) };
+    const WORDS: any = { raise: "RAISE IT", clear: "VERIFIED", noted: "NOTED", unchecked: "NOT CHECKED" };
+    const isNewCar = String(a.vehicleCondition || "").toLowerCase() === "new";
+    const cond = isNewCar ? "new" : "used";
+    const vehTitle = a.vehicle || [a.year, a.make, a.model, a.trim].filter(Boolean).join(" ") || "Your quote";
+
+    // One path per rounded box. rrect() builds a box from abutting rectangles,
+    // and on these dark cards the border shows through the seams as hairlines.
+    // Corners are quadratic curves: drawSvgPath flips an arc's sweep.
+    const rpath = (x: number, yTop: number, w: number, h: number, r: number, o: any = {}) => {
+      if (!(w > 0) || !(h > 0)) return;
+      const q = Math.max(0, Math.min(r, w / 2, h / 2));
+      const d = `M${q} 0 L${w - q} 0 Q${w} 0 ${w} ${q} L${w} ${h - q} Q${w} ${h} ${w - q} ${h} L${q} ${h} Q0 ${h} 0 ${h - q} L0 ${q} Q0 0 ${q} 0 Z`;
+      page.drawSvgPath(d, { x, y: yTop, ...(o.color ? { color: o.color } : {}), ...(o.borderColor ? { borderColor: o.borderColor, borderWidth: o.borderWidth ?? 0.7 } : {}) });
+    };
+    const TX = (s: string, x: number, yy: number, size: number, font: any, color: any, o: any = {}) =>
+      page.drawText(pdfSafe(s), { x, y: yy, size, font, color, ...o });
+    const TC = (s: string, cx: number, yy: number, size: number, font: any, color: any) => TX(s, cx - wSafe(font, s, size) / 2, yy, size, font, color);
+    const TR = (s: string, rx: number, yy: number, size: number, font: any, color: any) => TX(s, rx - wSafe(font, s, size), yy, size, font, color);
+    const fit = (s: string, font: any, size: number, maxW: number) => { let z = size; while (z > 5 && wSafe(font, s, z) > maxW) z -= 0.25; return z; };
+    const clamp = (s: string, font: any, size: number, maxW: number, max: number) => {
+      const ls = wrap(s, font, size, maxW);
+      if (ls.length <= max) return ls;
+      const out = ls.slice(0, Math.max(max, 1));
+      let last = out[out.length - 1];
+      while (last && wSafe(font, last + "...", size) > maxW) last = last.replace(/\s*\S+$/, "");
+      out[out.length - 1] = last + "...";
+      return out;
+    };
+    const splitTitle = (t: string): [string, string] => {
+      const fixed: any = { "Add-ons & fee audit": ["Add-ons &", "fee audit"], "EV / PHEV rebate": ["EV / PHEV", "rebate"] };
+      if (fixed[t]) return fixed[t];
+      const w = String(t).split(" ");
+      if (w.length < 2) return [t, ""];
+      return [w.slice(0, -1).join(" "), w[w.length - 1]];
+    };
+
+    // The state glyph: shape AND word carry the state, so a photocopy still reads.
+    const glyph = (st: string, cx: number, cy: number, r: number, col: any, ink: any) => {
+      if (st === "raise") {
+        page.drawSvgPath(`M0 ${-r} L${r} ${r * 0.85} L${-r} ${r * 0.85} Z`, { x: cx, y: cy, color: col });
+        page.drawLine({ start: { x: cx, y: cy + r * 0.38 }, end: { x: cx, y: cy - r * 0.18 }, thickness: r * 0.26, color: ink });
+        page.drawCircle({ x: cx, y: cy - r * 0.5, size: r * 0.14, color: ink });
+      } else if (st === "clear") {
+        page.drawCircle({ x: cx, y: cy, size: r, color: col });
+        page.drawSvgPath(`M${-r * 0.45} 0 L${-r * 0.1} ${r * 0.35} L${r * 0.5} ${-r * 0.35}`, { x: cx, y: cy, borderColor: ink, borderWidth: r * 0.28, borderLineCap: 1 });
+      } else if (st === "noted") {
+        rpath(cx - r, cy + r, r * 2, r * 2, r * 0.35, { color: col });
+        page.drawLine({ start: { x: cx - r * 0.5, y: cy }, end: { x: cx + r * 0.5, y: cy }, thickness: r * 0.28, color: ink });
+      } else {
+        page.drawCircle({ x: cx, y: cy, size: r, borderColor: col, borderWidth: r * 0.22 });
+        for (const k of [-0.45, 0, 0.45]) page.drawLine({ start: { x: cx + (k - 0.35) * r, y: cy - 0.55 * r }, end: { x: cx + (k + 0.35) * r, y: cy + 0.55 * r }, thickness: r * 0.16, color: col });
+      }
+    };
+
+    // ── ICONS, one per card, drawn in brand blue so they never compete with the state colour.
+    const FACE = rgb(0.227, 0.557, 1), DEEP = rgb(0.043, 0.184, 0.471), PALE = rgb(0.867, 0.945, 1), INKD = rgb(0.039, 0.086, 0.2);
+    const icon = (key: string, x: number, yTop: number, size: number, dim: boolean) => {
+      const s = size / 34, op = dim ? 0.4 : 1;
+      const P = (d: string, dx: number, dy: number, sc: number, color: any) => page.drawSvgPath(d, { x: x + dx * s, y: yTop - dy * s, scale: s * sc, color, opacity: op });
+      const PS = (d: string, color: any, w: number) => page.drawSvgPath(d, { x, y: yTop, scale: s, borderColor: color, borderWidth: w * s, borderLineCap: 1, borderOpacity: op });
+      const R = (rx: number, ry: number, w: number, h: number, color: any) => page.drawRectangle({ x: x + rx * s, y: yTop - (ry + h) * s, width: w * s, height: h * s, color, opacity: op });
+      const Ci = (cx: number, cy: number, r: number, color: any, border?: [any, number]) => page.drawCircle({ x: x + cx * s, y: yTop - cy * s, size: r * s, ...(color ? { color, opacity: op } : {}), ...(border ? { borderColor: border[0], borderWidth: border[1] * s, borderOpacity: op } : {}) });
+      const twice = (d: string, dx = 0, dy = 0, sc = 1) => { P(d, dx + 1.2, dy + 1.8, sc, DEEP); P(d, dx, dy, sc, FACE); };
+      switch (key) {
+        case "price_vs_msrp": case "used_vs_new_tag":
+          twice("M4 6.5 Q4 4 6.5 4 L17 4 L30 17 Q31.5 18.5 30 20 L20 30 Q18.5 31.5 17 30 L4 17 Z");
+          Ci(10, 10, 2.3, INKD);
+          page.drawText("$", { x: x + 16 * s, y: yTop - 22 * s, size: 11 * s, font: serifB, color: WHITE, opacity: op });
+          break;
+        case "recalls":
+          twice("M22.7 19 L13.6 9.9 C14.5 7.6 14 4.9 12.1 3 C10.1 1 7.1 0.6 4.7 1.7 L9 6 L6 9 L1.6 4.7 C0.4 7.1 0.9 10.1 2.9 12.1 C4.8 14 7.5 14.5 9.8 13.6 L18.9 22.7 C19.3 23.1 19.9 23.1 20.3 22.7 L22.6 20.4 C23.1 20 23.1 19.3 22.7 19 Z", 4, 4, 1.1);
+          break;
+        case "fees":
+          R(6.2, 4.8, 19, 25, DEEP); R(5, 3, 19, 25, FACE);
+          R(9, 8, 11, 1.8, PALE); R(9, 12, 11, 1.8, PALE); R(9, 16, 7, 1.8, PALE);
+          Ci(23, 23, 5.6, INKD, [WHITE, 2.4]);
+          PS("M27.2 27.2 L31 31", WHITE, 3);
+          break;
+        case "dealer_licence":
+          R(4.2, 8.8, 28, 21, DEEP); R(3, 7, 28, 21, FACE);
+          Ci(10.5, 14.5, 3, PALE); R(6.5, 19, 8, 4.5, PALE); R(17, 12.5, 10, 1.8, PALE); R(17, 16.5, 7, 1.8, PALE);
+          Ci(27, 25, 4.6, WHITE);
+          PS("M24.9 25.1 L26.4 26.6 L29.2 23.6", FACE, 1.6);
+          break;
+        case "finance_math":
+          R(8.2, 4.8, 20, 28, DEEP); R(7, 3, 20, 28, FACE); R(10, 6, 14, 6, PALE);
+          for (const bx of [10.5, 15.5, 20.5]) for (const by of [15, 20, 25]) R(bx, by, 3.4, 3.2, WHITE);
+          break;
+        case "odometer": {
+          Ci(18.2, 19.8, 14, DEEP); Ci(17, 18, 14, FACE); Ci(17, 18, 10.8, INKD);
+          const pts: string[] = [];
+          for (let t = 150; t <= 390; t += 15) { const r = (t * Math.PI) / 180; pts.push(`${(17 + 8.5 * Math.cos(r)).toFixed(2)} ${(18 + 8.5 * Math.sin(r)).toFixed(2)}`); }
+          PS("M" + pts.join(" L"), rgb(0.561, 0.816, 1), 1.8);
+          PS("M17 18 L22.4 11.8", WHITE, 2);
+          Ci(17, 18, 2, WHITE);
+          break;
+        }
+        case "vin":
+          R(3.2, 9.8, 30, 19, DEEP); R(2, 8, 30, 19, FACE); R(5, 11, 24, 13, rgb(0.918, 0.961, 1));
+          for (const [bx, bw] of [[6.5, 1.2], [8.5, 2], [11.3, 1], [13, 2.4], [16.1, 1], [17.8, 1.6], [20.1, 2.2], [23.1, 1], [24.8, 2], [27.4, 0.9]]) R(bx, 12.5, bw, 10, DEEP);
+          break;
+        case "rebate":
+          Ci(18.2, 18.8, 14, DEEP); Ci(17, 17, 14, FACE);
+          P("M19 5 L10 19 L16 19 L13.5 29 L24 14 L17.5 14 Z", 0, 0, 1, WHITE);
+          break;
+        case "warranty":
+          twice("M17 3 L29 7.5 L29 16 C29 23.5 23.8 28.5 17 31 C10.2 28.5 5 23.5 5 16 L5 7.5 Z");
+          PS("M11.5 17 L15.5 21 L23 13", WHITE, 3);
+          break;
+        case "reputation": {
+          const pts: string[] = [];
+          for (let i = 0; i < 10; i++) { const ang = ((-90 + i * 36) * Math.PI) / 180, r = i % 2 ? 6.4 : 14.5; pts.push(`${(17 + r * Math.cos(ang)).toFixed(2)} ${(17.5 + r * Math.sin(ang)).toFixed(2)}`); }
+          twice("M" + pts.join(" L") + " Z");
+          break;
+        }
+        case "days_on_lot":
+          R(5.2, 7.8, 25, 23, DEEP); R(4, 6, 25, 23, FACE); R(4, 6, 25, 6.5, DEEP);
+          R(9, 3, 2.6, 6, WHITE); R(21.4, 3, 2.6, 6, WHITE);
+          for (const gx of [8, 13, 18, 23]) for (const gy of [16, 20.5]) R(gx, gy, 2.8, 2.6, PALE);
+          Ci(25, 25, 7, WHITE); Ci(25, 25, 5.4, null, [FACE, 1.4]);
+          PS("M25 22 L25 25.2 L27.2 26.6", FACE, 1.5);
+          break;
+        case "apr_vs_maker":
+          Ci(18.2, 18.8, 14, DEEP); Ci(17, 17, 14, FACE);
+          Ci(12, 12.5, 3, null, [WHITE, 2.2]); Ci(22, 21.5, 3, null, [WHITE, 2.2]);
+          PS("M23 10.5 L11 23.5", WHITE, 2.4);
+          break;
+        case "used_vs_new":
+          twice("M2 22.5 C2 19.1 4 17.9 6.4 17.3 L10.6 12.4 C11.6 11.3 12.9 10.7 14.4 10.7 L20.8 10.7 C22.4 10.7 23.8 11.3 24.8 12.5 L28.5 17 C31.5 17.4 33 18.9 33 21.6 L33 23.9 C33 24.8 32.3 25.5 31.4 25.5 L3.6 25.5 C2.7 25.5 2 24.8 2 23.9 Z");
+          P("M9.6 17.1 L12.6 13.6 C13.2 12.9 14 12.6 14.9 12.6 L17.5 12.6 L17.5 17.1 Z", 0, 0, 1, PALE);
+          P("M19.4 12.6 L20.8 12.6 C21.7 12.6 22.6 13 23.2 13.7 L26 17.1 L19.4 17.1 Z", 0, 0, 1, PALE);
+          Ci(9.5, 26, 3.6, INKD, [WHITE, 1.4]); Ci(26, 26, 3.6, INKD, [WHITE, 1.4]);
+          break;
+        case "freight_pdi":
+          R(3.2, 9.8, 18, 15, DEEP); twice("M20 12 L26 12 L30 17 L30 23 L20 23 Z"); R(2, 8, 18, 15, FACE);
+          P("M22 14 L25.3 14 L27.7 17 L22 17 Z", 0, 0, 1, PALE);
+          R(5, 12, 12, 2, PALE); R(5, 16, 8, 2, PALE);
+          Ci(8, 25, 3.3, INKD, [WHITE, 1.4]); Ci(25, 25, 3.3, INKD, [WHITE, 1.4]);
+          break;
+      }
+    };
+
+    // 45-degree hatch inside a box: NOT CHECKED never renders as a flat colour,
+    // which would read as a quiet pass. [[supervised-correctness-is-not-correctness]]
+    const hatch = (x: number, yTop: number, w: number, h: number, col: any, step = 6) => {
+      const yb = yTop - h;
+      for (let k = -h; k < w; k += step) {
+        let x1 = x + k, y1 = yb, x2 = x + k + h, y2 = yTop;
+        if (x1 < x) { y1 += x - x1; x1 = x; }
+        if (x2 > x + w) { y2 -= x2 - (x + w); x2 = x + w; }
+        if (y2 > y1) page.drawLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, thickness: 0.6, color: col });
+      }
+    };
+
+    const drawHeader = () => {
+      const top = PH - 28;
+      drawLogo(HM - 6, top + 2, 34);
+      TX("Lot", HM + 26, top - 16, 15, serifB, NAVY);
+      TX("Check", HM + 26 + wSafe(serifB, "Lot", 15), top - 16, 15, serifB, BLUE);
+      TR("QUOTE CHECK REPORT", PW - HM, top - 7, 6.8, sansB, FAINT);
+      TR("No. " + RID + (a.reportDate ? "  -  " + a.reportDate : ""), PW - HM, top - 17, 6.8, sans, FAINT);
+      page.drawLine({ start: { x: HM, y: top - 25 }, end: { x: PW - HM, y: top - 25 }, thickness: 1.2, color: NAVY });
+      return top - 25;
+    };
+    const drawFooter = () => {
+      page.drawLine({ start: { x: HM, y: 36 }, end: { x: PW - HM, y: 36 }, thickness: 0.6, color: HAIR });
+      drawLogo(HM - 4, 31, 16);
+      TX("Lot", HM + 12, 22, 7.5, serifB, NAVY);
+      TX("Check", HM + 12 + wSafe(serifB, "Lot", 7.5), 22, 7.5, serifB, BLUE);
+      TR((verifyUrl ? "Tamper-evident report " : "Report ") + "No. " + RID + (verifyUrl ? "  -  verify at lotcheck.ca/verify" : ""), PW - HM, 23, 6.2, sans, FAINT);
+    };
+
+    // One card: dark glass, the state colour on its border, badge on the corner.
+    const drawCard = (c: any, x: number, yTop: number, w: number, h: number) => {
+      const col = DK[c.state], un = c.state === "unchecked", yb = yTop - h;
+      rpath(x, yTop, w, h, 7, { color: CARD, borderColor: col, borderWidth: un ? 0.8 : 1.1 });
+      if (un) hatch(x + 1.5, yTop - 1.5, w - 3, h - 3, HATCH);
+      page.drawCircle({ x: x + 3, y: yTop - 3, size: 9.6, color: WHITE });
+      page.drawCircle({ x: x + 3, y: yTop - 3, size: 8.2, color: WHITE, borderColor: col, borderWidth: 1.3 });
+      TC(c.n, x + 3, yTop - 5.4, 6.8, sansB, NAVY);
+      icon(c.key, x + 8, yTop - 11, 21, un);
+      const tx = x + 34, tw = w - 40;
+      let yy = yTop - 15;
+      const [t1, t2] = splitTitle(c.title);
+      TX(t1.toUpperCase(), tx, yy, fit(t1.toUpperCase(), serifB, 7.4, tw), serifB, col);
+      if (t2) { yy -= 8.6; TX(t2.toUpperCase(), tx, yy, fit(t2.toUpperCase(), serifB, 7.4, tw), serifB, WHITE); }
+      yy -= 10;
+      glyph(c.state, tx + 3.2, yy + 2.4, 3.2, col, CARD);
+      TX(WORDS[c.state], tx + 8.5, yy, 6.1, sansB, col);
+      const wordW = wSafe(sansB, WORDS[c.state], 6.1);
+      const val = String(c.value || "");
+      if (val && val !== WORDS[c.state]) {
+        if (wSafe(sansB, val, 5.8) <= tw - wordW - 14) TX(val, tx + 8.5 + wordW + 4, yy, 5.8, sansB, col);
+        else { yy -= 7.6; TX(val, tx, yy, fit(val, sansB, 5.8, tw), sansB, col); }
+      }
+      // Suggestion block at the foot, measured first so the summary fills only the space left.
+      const sugLab = "SUGGESTION: ";
+      const sugLines = clamp(sugLab + (c.suggestion || ""), sans, 5.9, w - 14, 2);
+      const sugTop = yb + 5 + sugLines.length * 7.2 + 3;
+      page.drawLine({ start: { x: x + 7, y: sugTop }, end: { x: x + w - 7, y: sugTop }, thickness: 0.5, color: rgb(0.2, 0.27, 0.42) });
+      sugLines.forEach((ln, i) => {
+        const ly = sugTop - 8.4 - i * 7.2;
+        if (i === 0 && ln.startsWith("SUGGESTION:")) {
+          TX("SUGGESTION:", x + 7, ly, 5.9, sansB, CYAN);
+          TX(ln.slice(sugLab.length), x + 7 + wSafe(sansB, "SUGGESTION: ", 5.9), ly, 5.9, sans, WHITE);
+        } else TX(ln, x + 7, ly, 5.9, sans, WHITE);
+      });
+      const room = Math.floor((yy - 5 - sugTop) / 7.6);
+      if (room > 0 && c.short) clamp(c.short, sans, 6.2, tw, room).forEach((ln, i) => TX(ln, tx, yy - 8.4 - i * 7.6, 6.2, sans, MUTE));
+    };
+
+    // ── PAGE 1 ─────────────────────────────────────────────────────────────
+    const hdr = drawHeader();
+    TX(vehTitle, HM, hdr - 22, fit(vehTitle, serifB, 15, CW * 0.55), serifB, NAVY);
+    const idLine = [a.vinCheck?.vin ? "VIN " + a.vinCheck.vin : null, cond.toUpperCase(), a.odometerKm != null && Number.isFinite(Number(a.odometerKm)) ? Number(a.odometerKm).toLocaleString("en-CA") + " KM" : null, a.dealerCity || null].filter(Boolean).join("  -  ");
+    TR(idLine, PW - HM, hdr - 19, fit(idLine, sans, 6.5, CW * 0.44), sans, FAINT);
+
+    const gTop = hdr - 38, colW = 150, gap = 10, sideW = (CW - colW - gap * 2) / 2;
+    const bottomRowH = 84, stripH = 18, gBottom = 42 + stripH + 8 + bottomRowH + 8;
+    const cardH = (gTop - gBottom - 4 * 7) / 5;
+    const L = cards.slice(0, 5), Rr = cards.slice(5, 10);
+    L.forEach((c: any, i: number) => drawCard(c, HM, gTop - i * (cardH + 7), sideW, cardH));
+    Rr.forEach((c: any, i: number) => drawCard(c, HM + sideW + gap + colW + gap, gTop - i * (cardH + 7), sideW, cardH));
+
+    // Centre column: the car, the headline figure, the listings as strands.
+    const cx0 = HM + sideW + gap, cxm = cx0 + colW / 2;
+    let cy = gTop;
+    const PHW = colW, PHH = colW * 0.75;
+    rpath(cx0, cy, PHW, PHH, 6, { color: PANEL2, borderColor: HAIR, borderWidth: 0.7 });
+    if (heroImg) {
+      const sc = Math.min((PHW - 2) / heroImg.width, (PHH - 2) / heroImg.height);
+      const dw = heroImg.width * sc, dh = heroImg.height * sc;
+      page.drawImage(heroImg, { x: cx0 + (PHW - dw) / 2, y: cy - PHH + (PHH - dh) / 2, width: dw, height: dh });
+      TC("The dealer's own listing photo", cxm, cy - PHH - 9, 6, serifI, FAINT);
+    } else {
+      TC("NO PHOTO PUBLISHED", cxm, cy - PHH / 2 + 2, 6.5, sansB, FAINT);
+      TC("in this listing's own page data", cxm, cy - PHH / 2 - 8, 6.5, sans, FAINT);
+    }
+    cy -= PHH + 16;
+
+    const c01 = cards[0];
+    const circR = 50, ccy = cy - circR - 2;
+    page.drawCircle({ x: cxm, y: ccy, size: circR, color: WHITE, borderColor: rgb(0.953, 0.965, 0.984), borderWidth: 6 });
+    page.drawCircle({ x: cxm, y: ccy, size: circR - 3.5, borderColor: HAIR, borderWidth: 0.8 });
+    const kick = isNewCar ? "PRICE VS MSRP" : "PRICE VS MARKET";
+    TC(kick, cxm, ccy + 19, 5.8, sansB, BLUE);
+    const vm = String(c01.value || "").match(/^([+-]?\$[\d,.]+)\s+(.*)$/);
+    const big = vm ? vm[1] : String(c01.value || "");
+    TC(big, cxm, ccy + 1, fit(big, serifB, 16, circR * 1.7), serifB, LT[c01.state]);
+    const mvc = a.marketValue || {};
+    const vWords = vm ? vm[2].toLowerCase() : "";
+    const sub = !vm ? "" : isNewCar ? `${vWords} MSRP${a.allInPricing ? ", all-in" : ""}` : (Number(mvc.comps) > 0 ? `${vWords} of ${mvc.comps} listings` : vWords);
+    if (sub) TC(sub, cxm, ccy - 10, fit(sub, sans, 6.2, circR * 1.6), sans, SOFT);
+    TC("see point 01", cxm, ccy - 19, 5.4, sans, FAINT);
+    cy = ccy - circR - 10;
+
+    // The fibre gauge. Every strand is ONE sealed listing, its height its price;
+    // the green line is the reference the claim gate itself uses (MSRP on a new
+    // car, the middle of the similar listings on a used one).
+    const gH = cy - gBottom - 16, gW = colW, gx0 = cx0, gyT = cy;
+    if (gH > 60) {
+      const stops: [number, number[]][] = [[0, [0.020, 0.043, 0.110]], [0.42, [0.043, 0.106, 0.247]], [0.66, [0.227, 0.361, 0.596]], [0.82, [0.796, 0.855, 0.941]], [0.94, [1, 1, 1]], [1, [1, 1, 1]]];
+      const at = (t: number) => { for (let i = 1; i < stops.length; i++) if (t <= stops[i][0]) { const [t0, c0] = stops[i - 1], [t1, c1] = stops[i]; const k = (t - t0) / (t1 - t0 || 1); return rgb(c0[0] + (c1[0] - c0[0]) * k, c0[1] + (c1[1] - c0[1]) * k, c0[2] + (c1[2] - c0[2]) * k); } return WHITE; };
+      const N = 48;
+      for (let i = 0; i < N; i++) page.drawRectangle({ x: gx0, y: gyT - (i + 1) * (gH / N), width: gW, height: gH / N + 0.4, color: at((i + 0.5) / N) });
+      const base = gyT - gH + 30, top = gyT - 12, mid = gx0 + gW / 2;
+      for (let k = 0; k < 41; k++) {
+        const i = k - 20, sgn = Math.sign(i) || 1, x0 = mid + i * 1.1, x1 = mid + i * 3.6 + sgn * Math.abs(i) * 0.5;
+        page.drawSvgPath(`M${x0} ${-(base + 10)} Q${mid + i * 1.5} ${-(gyT - gH + 10)} ${x1} ${-(gyT - gH + 1)}`, { x: 0, y: 0, borderColor: [FACE, rgb(0.310, 0.659, 1), rgb(0.624, 0.831, 1)][k % 3], borderWidth: 0.6, borderOpacity: 0.55 });
+      }
+      const mv = a.marketValue || {};
+      const rows: any[] = Array.isArray(mv.sample) ? mv.sample.filter((r: any) => Number(r?.price) > 0) : [];
+      const claim = qualifyMsrpClaim(a);
+      const ref = isNewCar ? (claim.comparable && Number(claim.reference) > 0 ? Number(claim.reference) : null) : (Number(mv.average) > 0 ? Number(mv.average) : null);
+      const ask = Number(a.quotedPrice) > 0 ? Number(a.quotedPrice) : null;
+      const vals = [...rows.map((r: any) => Number(r.price)), ask, ref].filter((v: any) => Number(v) > 0) as number[];
+      if (vals.length) {
+        const lo = Math.min(...vals) * 0.985, hi = Math.max(...vals) * 1.01;
+        const Y = (v: number) => base + ((v - lo) / (hi - lo || 1)) * (top - base);
+        const strand = (sx: number, v: number, col: any, w: number, halo: number) => {
+          page.drawLine({ start: { x: sx, y: base - 4 }, end: { x: sx, y: Y(v) }, thickness: w, color: rgb(0.745, 0.890, 1), opacity: 0.85 });
+          page.drawCircle({ x: sx, y: Y(v), size: halo, color: col, opacity: 0.28 });
+          page.drawCircle({ x: sx, y: Y(v), size: w + 0.9, color: rgb(0.949, 0.980, 1), borderColor: col, borderWidth: 0.9 });
+        };
+        const order = rows.map((r: any) => Number(r.price)).sort((p, q) => q - p);
+        order.forEach((v, i) => strand(mid + (i % 2 ? -1 : 1) * 11 * (Math.floor(i / 2) + 1), v, rgb(0.424, 0.769, 1), 0.8, 3.8));
+        if (ref) {
+          page.drawRectangle({ x: gx0, y: Y(ref) - 2.5, width: gW, height: 5, color: DK.clear, opacity: 0.14 });
+          page.drawLine({ start: { x: gx0, y: Y(ref) }, end: { x: gx0 + gW, y: Y(ref) }, thickness: 1, color: DK.clear });
+          const lab = isNewCar ? "MSRP" + (claim.comparedAgainst === "all_in" || a.allInPricing ? " ALL-IN" : "") : "MIDDLE";
+          rpath(gx0 + 3, Y(ref) + 13, 50, 18, 3, { color: rgb(0.039, 0.165, 0.133), borderColor: DK.clear, borderWidth: 0.6 });
+          TC(lab, gx0 + 28, Y(ref) + 6.5, 4.6, sansB, DK.clear);
+          TC(fmtMoney(ref), gx0 + 28, Y(ref) - 0.5, fit(fmtMoney(ref), sansB, 6.4, 46), sansB, WHITE);
+        }
+        if (ask) {
+          const col = DK[c01.state];
+          strand(mid, ask, col, 1.5, 5.5);
+          const ty = Math.min(Y(ask) + 8, gyT - 4);
+          rpath(gx0 + gW - 53, ty, 50, ref ? 25 : 18, 3, { color: c01.state === "raise" ? rgb(0.180, 0.059, 0.047) : rgb(0.039, 0.165, 0.133), borderColor: col, borderWidth: 0.6 });
+          TC("ASKING", gx0 + gW - 28, ty - 6.5, 4.6, sansB, col);
+          TC(fmtMoney(ask), gx0 + gW - 28, ty - 13.5, fit(fmtMoney(ask), sansB, 6.4, 46), sansB, WHITE);
+          if (ref) { const d = ask - ref, dl = (d >= 0 ? "+" : "-") + fmtMoney(Math.abs(d)); TC(dl, gx0 + gW - 28, ty - 20.5, fit(dl, sansB, 5.4, 46), sansB, rgb(1, 0.706, 0.659)); }
+        }
+      }
+      const cap = rows.length
+        ? (isNewCar ? "Each strand is one other Alberta dealer's price for this car." : `Each strand is one of ${rows.length} similar Alberta listings.`)
+        : "No similar listings were sealed with this report.";
+      TC(cap, cxm, gyT - gH - 8, fit(cap, sans, 5.6, colW + 8), sans, FAINT);
+    }
+
+    // Bottom row: cards 11-13.
+    const w3 = (CW - gap * 2) / 3, rowTop = 42 + stripH + 8 + bottomRowH;
+    cards.slice(10, 13).forEach((c: any, i: number) => drawCard(c, HM + i * (w3 + gap), rowTop, w3, bottomRowH));
+
+    // The tally strip: states, never a total. [[claims-must-stay-backed]]
+    const sy = 42 + stripH;
+    rpath(HM, sy, CW, stripH, 5, { color: WHITE, borderColor: HAIR, borderWidth: 0.8 });
+    let tx0 = HM + 12;
+    for (const st of ["raise", "clear", "noted", "unchecked"]) {
+      glyph(st, tx0 + 3.5, sy - 9, 3.5, LT[st], WHITE);
+      const lab = `${(tally as any)[st]} ${WORDS[st].toLowerCase()}`;
+      TX(lab, tx0 + 10, sy - 11.5, 7.2, sansB, LT[st]);
+      tx0 += 10 + wSafe(sansB, lab, 7.2) + 16;
+    }
+    TR("SUMMARY NEXT PAGE  -  FULL DETAIL AFTER IT", PW - HM - 10, sy - 11.5, 6.2, sansB, BLUE);
+    drawFooter();
+
+    // ── SUMMARY + THANK YOU ────────────────────────────────────────────────
+    page = doc.addPage([PW, PH]); paper();
+    let yy = drawHeader() - 14;
+    TX(`SUMMARY  -  ${vehTitle.toUpperCase()}  -  ${cond.toUpperCase()}`, HM, yy, fit(`SUMMARY  -  ${vehTitle.toUpperCase()}  -  ${cond.toUpperCase()}`, sansB, 7, CW), sansB, BLUE);
+    yy -= 18;
+    TX("What to take into the conversation", HM, yy, 15, serifB, NAVY);
+    yy -= 12;
+
+    // At a glance: the four counts, then what is worth raising, by name.
+    const heroH = 82;
+    rpath(HM, yy, CW, heroH, 9, { color: NAVY });
+    TX(`YOUR REPORT AT A GLANCE  -  ${cards.length} CHECKS`, HM + 14, yy - 15, 6.4, sansB, CYAN);
+    const colN = CW / 4;
+    ["raise", "clear", "noted", "unchecked"].forEach((st, i) => {
+      const ccx = HM + colN * i + colN / 2, n = String((tally as any)[st]);
+      const nw = wSafe(serifB, n, 20);
+      glyph(st, ccx - nw / 2 - 9, yy - 34, 5, DK[st], NAVY);
+      TX(n, ccx - nw / 2, yy - 41, 20, serifB, DK[st]);
+      TC(WORDS[st] === "RAISE IT" ? "TO RAISE" : WORDS[st], ccx, yy - 52, 5.8, sansB, MUTE);
+    });
+    const raises = cards.filter((c: any) => c.state === "raise");
+    const gist = raises.length ? `Worth raising: ${raises.map((c: any) => c.title).join(", ")}.` : "Nothing on this report is worth raising.";
+    clamp(gist, sans, 7.2, CW - 28, 1).forEach((ln) => TX(ln, HM + 14, yy - 70, 7.2, sans, WHITE));
+    yy -= heroH + 14;
+
+    if (raises.length) {
+      TX(`${raises.length === 1 ? "ONE THING" : raises.length + " THINGS"} WORTH RAISING`, HM, yy, 7.2, sansB, LT.raise);
+      yy -= 7;
+      for (const c of raises) {
+        const detail = clamp(c.short, sans, 6.8, CW - 150, 1)[0] || "";
+        const sug = clamp("SUGGESTION: " + c.suggestion, sans, 6.8, CW - 44, 1)[0] || "";
+        const rh = 30;
+        if (yy - rh < 200) { drawFooter(); page = doc.addPage([PW, PH]); paper(); yy = drawHeader() - 14; }
+        rpath(HM, yy, CW, rh, 6, { color: WHITE, borderColor: HAIR, borderWidth: 0.8 });
+        page.drawRectangle({ x: HM, y: yy - rh + 1, width: 3.5, height: rh - 2, color: LT.raise });
+        page.drawCircle({ x: HM + 18, y: yy - rh / 2, size: 8, color: WHITE, borderColor: LT.raise, borderWidth: 1.2 });
+        TC(c.n, HM + 18, yy - rh / 2 - 2.4, 6.8, sansB, NAVY);
+        TX(c.title, HM + 32, yy - 11.5, 7.6, serifB, NAVY);
+        const tw0 = wSafe(serifB, c.title, 7.6);
+        TX(String(c.value || ""), HM + 32 + tw0 + 6, yy - 11.5, 6.6, sansB, LT.raise);
+        const vw = wSafe(sansB, String(c.value || ""), 6.6);
+        if (HM + 32 + tw0 + 6 + vw + 8 < PW - HM - 20) TX(clamp(detail, sans, 6.6, PW - HM - 12 - (HM + 32 + tw0 + 6 + vw + 8), 1)[0] || "", HM + 32 + tw0 + 6 + vw + 8, yy - 11.5, 6.6, sans, SOFT);
+        if (sug.startsWith("SUGGESTION:")) {
+          TX("SUGGESTION:", HM + 32, yy - 22.5, 6.8, sansB, BLUE);
+          TX(sug.slice(12), HM + 32 + wSafe(sansB, "SUGGESTION: ", 6.8), yy - 22.5, 6.8, sans, NAVY);
+        }
+        yy -= rh + 5;
+      }
+      yy -= 6;
+    }
+
+    // What checked out, and what is noted or worth checking yourself.
+    const clears = cards.filter((c: any) => c.state === "clear");
+    const rest = cards.filter((c: any) => c.state === "noted" || c.state === "unchecked");
+    const leftW = CW * 0.54, rightW = CW - leftW - 12, chipH = 24;
+    const chip = (c: any, x: number, top: number, w: number, detail: string) => {
+      rpath(x, top, w, chipH, 5, { color: LTBG[c.state], borderColor: LT[c.state], borderWidth: 0.8 });
+      if (c.state === "unchecked") hatch(x + 1, top - 1, w - 2, chipH - 2, rgb(0.86, 0.86, 0.84), 5);
+      glyph(c.state, x + 10, top - chipH / 2, 3.8, LT[c.state], WHITE);
+      TX(`${c.n}  -  ${c.title}`, x + 19, top - 10, fit(`${c.n}  -  ${c.title}`, sansB, 7, w - 24), sansB, NAVY);
+      TX(clamp(detail, sans, 6.2, w - 24, 1)[0] || "", x + 19, top - 18.5, 6.2, sans, SOFT);
+    };
+    const secTop = yy;
+    if (clears.length) {
+      TX("CHECKED AND CLEAR", HM, yy, 7.2, sansB, LT.clear);
+      const cw2 = (leftW - 6) / 2;
+      clears.forEach((c: any, i: number) => chip(c, HM + (i % 2) * (cw2 + 6), secTop - 7 - Math.floor(i / 2) * (chipH + 5), cw2, String(c.value || "")));
+    }
+    if (rest.length) {
+      TX(rest.some((c: any) => c.state === "noted") ? "NOTED, OR WORTH CHECKING YOURSELF" : "WORTH CHECKING YOURSELF", HM + leftW + 12, secTop, 7.2, sansB, LT.noted);
+      rest.forEach((c: any, i: number) => chip(c, HM + leftW + 12, secTop - 7 - i * (chipH + 5), rightW, c.suggestion || String(c.value || "")));
+    }
+    const leftRows = Math.ceil(clears.length / 2), rightRows = rest.length;
+    yy = secTop - 7 - Math.max(leftRows, rightRows) * (chipH + 5) - 8;
+
+    // Thank you. Research partner, never "partner in buying": what we do is
+    // research. [[amvic-broker-registration]] Never assumes a signature.
+    // [[no-assume-the-client-signs]]
+    const tyH = 128;
+    if (yy - tyH < 46) { drawFooter(); page = doc.addPage([PW, PH]); paper(); yy = drawHeader() - 14; }
+    const tyTop = yy, NB = 32;
+    for (let i = 0; i < NB; i++) {
+      const k = i / (NB - 1);
+      page.drawRectangle({ x: HM, y: tyTop - (i + 1) * (tyH / NB), width: CW, height: tyH / NB + 0.4, color: rgb(0.020 + (0.114 - 0.020) * k, 0.043 + (0.243 - 0.043) * k, 0.110 + (0.471 - 0.110) * k) });
+    }
+    for (let k = 0; k < 61; k++) {
+      const i = k - 30, mid = HM + CW / 2;
+      page.drawSvgPath(`M${mid + i * 2} ${-(tyTop - tyH + 30)} Q${mid + i * 3.4} ${-(tyTop - tyH + 12)} ${mid + i * 8} ${-(tyTop - tyH)}`, { x: 0, y: 0, borderColor: [FACE, rgb(0.310, 0.659, 1), rgb(0.624, 0.831, 1)][k % 3], borderWidth: 0.5, borderOpacity: 0.45 });
+    }
+    TX("THANK YOU", HM + 16, tyTop - 16, 6.4, sansB, CYAN);
+    const thanks = `Thank you for choosing LotCheck as your ${cond}-car research partner.`;
+    const tl = wrap(thanks, serifB, 13, CW - 150);
+    tl.forEach((ln, i) => TX(ln, HM + 16, tyTop - 32 - i * 15, 13, serifB, WHITE));
+    let by = tyTop - 32 - tl.length * 15 - 4;
+    const lead = "You checked the numbers first. That is the hardest part, and it is done. ";
+    const body = lead + "The dealer has a whole team working the numbers. Today you have the same numbers in your hand: the market, the sticker, the fine print. Whatever you decide, you are deciding with the facts in front of you. You've got this.";
+    wrap(body, sans, 7.6, CW - 150).forEach((ln, i) => TX(ln, HM + 16, by - i * 10, 7.6, sans, i === 0 ? WHITE : MUTE));
+    rpath(PW - HM - 108, tyTop - 12, 94, 30, 6, { color: WHITE });
+    drawLogo(PW - HM - 104, tyTop - 16, 24);
+    TX("Lot", PW - HM - 78, tyTop - 31, 11, serifB, NAVY);
+    TX("Check", PW - HM - 78 + wSafe(serifB, "Lot", 11), tyTop - 31, 11, serifB, BLUE);
+    TR("ON THE BUYER'S SIDE", PW - HM - 14, tyTop - 54, 5.8, sansB, CYAN);
+    TR("OF THE TABLE", PW - HM - 14, tyTop - 62, 5.8, sansB, CYAN);
+    page.drawLine({ start: { x: HM + 16, y: tyTop - tyH + 30 }, end: { x: PW - HM - 16, y: tyTop - tyH + 30 }, thickness: 0.5, color: rgb(0.25, 0.33, 0.52) });
+    TX("Proudly built in Calgary.", HM + 16, tyTop - tyH + 18, 7, sansB, WHITE);
+    TX("Thank you for supporting a local startup. Every check helps grow good jobs right here in Alberta.", HM + 16 + wSafe(sansB, "Proudly built in Calgary. ", 7), tyTop - tyH + 18, 7, sans, MUTE);
+    drawFooter();
+
+    // The full detail follows on a fresh page, exactly as before.
+    page = doc.addPage([PW, PH]); paper(); y = PH - M;
+  }
+
   drawLogo(M, y + 2, 38);
   T("LOTCHECK", { size: 15, font: serifB, color: INK, x: M + 48 });
   // Measure the widest header line and seat the check badge clear to its left
@@ -1516,9 +1981,9 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   let photoImg: any = null;
   if (vehiclePhoto) {
     try {
-      photoImg = vehiclePhoto.kind === "png"
+      photoImg = heroImg || (vehiclePhoto.kind === "png"
         ? await doc.embedPng(vehiclePhoto.bytes)
-        : await doc.embedJpg(vehiclePhoto.bytes);
+        : await doc.embedJpg(vehiclePhoto.bytes));
     } catch (e) {
       // Bytes that passed the magic-byte check can still be a malformed or
       // progressive JPEG pdf-lib declines. The report is not worth a picture.
@@ -2467,13 +2932,10 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     rule();
   }
 
-  // ---- CLOSING (thank-you) + FOOTER ----
+  // ---- CLOSING ---- The thank-you now lives on page 2 (the summary), so it
+  // is not repeated here -- and the old line assumed the buyer would sign.
+  // [[no-assume-the-client-signs]]
   advance(8);
-  need(64);
-  center("Thank you for letting LotCheck check your quote.", y - 14, { size: 14, font: serifB, color: INK });
-  y -= 24;
-  for (const ln of wrap("You did the smart thing by looking before you signed. Walk in knowing your numbers, ask the questions above, and good luck at the table - we're rooting for you.", serifI, 10.5, W - 60)) { center(ln, y - 11, { size: 10.5, font: serifI, color: SOFT }); y -= 15; }
-  y -= 6;
 
   // ---- VERIFIED CLOSER ---- Vic, 2026-09-10: "i don't like qr code and check
   // lc report on top right dosent look professional" -- dropped the QR code

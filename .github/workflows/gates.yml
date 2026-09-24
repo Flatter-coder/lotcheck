@@ -453,6 +453,12 @@ jobs:
       # claim a verdict. Verified to fail on five injections.
       - name: The ten bands, and what they say when a check did not run
         run: npm run test:report-bands
+      # The redesigned report's thirteen cards (Hub & Spoke, 2026-09-24): cards
+      # 01-10 must carry their band's state and value unchanged, cards 11-13 may
+      # only state a figure a source stated, green must name its source, and no
+      # card's copy may assume the buyer will sign.
+      - name: The thirteen report cards
+        run: npm run test:report-cards
       # manufacturer_warranties is 35 makes of hand-typed figures that had NO
       # refresh job of any kind -- not stale, never checked. The Tesla row said
       # 160,000 km (the Extended Service Agreement ceiling, not the battery
