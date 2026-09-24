@@ -377,7 +377,31 @@ console.log("\n-- likeForLikePool + marketCompareLine --");
   const { canonicalReport } = await import("../supabase/functions/_shared/report-sign.ts");
   const full = { ...A, vehicle: "2024 Lexus RX 350 Luxury AWD", quotedPrice: 59900, marketValue: mv6 };
   const c = canonicalReport(full);
-  check("the canonical is at its current version and seals the basis keys", c.v === 14 && c.marketValue.mk === "Lexus" && c.marketValue.pv === "AB" && c.marketValue.from === "2026-08-03", JSON.stringify(c.marketValue));
+  check("the canonical is at its current version and seals the basis keys", c.v === 15 && c.marketValue.mk === "Lexus" && c.marketValue.pv === "AB" && c.marketValue.from === "2026-08-03", JSON.stringify(c.marketValue));
+  // v15: the listings behind the figures are SEALED (compact), and read back
+  // through normMv as the same rows -- so the PDF's compare page prints what
+  // was signed, never a second read.
+  const sampleRows = [
+    { price: 38900, km: 45895, year: 2023, trim: "XLE", city: "Edmonton", dealer: "Alberta Honda", asOf: "2026-08-18" },
+    { price: 42900, km: 20754, year: 2025, trim: "XLE", city: "Calgary", dealer: null, asOf: "2026-08-18" },
+  ];
+  const cs = canonicalReport({ ...full, marketValue: { ...mv6, sample: sampleRows } });
+  check("v15 seals the listings compactly (price, km, year, trim, city, dealer, read date); an unnamed dealer stays null",
+    Array.isArray(cs.marketValue.rows) && cs.marketValue.rows.length === 2 && cs.marketValue.rows[0].p === 38900 && cs.marketValue.rows[0].k === 45895 && cs.marketValue.rows[0].d === "Alberta Honda" && cs.marketValue.rows[1].d === null && cs.marketValue.rows[1].s === "2026-08-18",
+    JSON.stringify(cs.marketValue.rows));
+  check("a report with no sample seals an empty list, never a missing key", Array.isArray(c.marketValue.rows) && c.marketValue.rows.length === 0, JSON.stringify(c.marketValue.rows));
+  const { sampleOf } = await import("../supabase/functions/_shared/marketvalue.ts");
+  const pool = [
+    { price: 34900, odometerKm: 67414, year: 2023, trim: "XLE", city: "Calgary", dealerName: "VALENTINE VOLVO", asOf: "2026-09-07" },
+    { price: 38900, odometerKm: 45895, year: 2023, trim: "XLE", city: "Edmonton", dealerName: "Alberta Honda", asOf: "2026-08-18" },
+    { price: 39998, odometerKm: 45479, year: 2024, trim: "XLE", city: "Tsuut'ina Nation", dealerName: "TAZA PARK VOLKSWAGEN", asOf: "2026-09-24" },
+    { price: 41900, odometerKm: 34576, year: 2023, trim: "XLE", city: "Edmonton", dealerName: "N/A", asOf: "2026-08-18" },
+  ];
+  const two = sampleOf(pool, 48210, 2);
+  check("sampleOf keeps the listings CLOSEST IN ODOMETER to the subject, then shows them by price",
+    two.length === 2 && two[0].price === 38900 && two[1].price === 39998, JSON.stringify(two));
+  check("sampleOf never prints 'N/A' as a dealer", sampleOf(pool, 48210).find((r) => r.price === 41900).dealer === null);
+  check("sampleOf caps at seven", sampleOf(Array.from({ length: 12 }, (_, i) => ({ price: 30000 + i, odometerKm: 40000 + i * 100 })), 40000).length === 7);
   const viaVerify = marketCompareLine(verifyArg(c));
   check("the signed canonical round-trips the FULL sentence (make, model, province, dates, dealers)", JSON.stringify(viaVerify.lines) === JSON.stringify(am.lines) && viaVerify.light === am.light && viaVerify.title === am.title, JSON.stringify(viaVerify.lines));
   const cNone = canonicalReport({ ...A, year: 2026, vehicle: "2026 Lexus RX 350 Luxury AWD", quotedPrice: 69898, marketValue: MVN });
@@ -470,7 +494,7 @@ console.log("\n-- olderYearsLadder + olderYearsLine --");
   // Sealed round trip through the SERVER canonical, fed as /verify feeds it.
   const { canonicalReport } = await import("../supabase/functions/_shared/report-sign.ts");
   const cc = canonicalReport({ ...A, vehicle: "2026 Lexus RX 350 Luxury AWD", quotedPrice: 69898, olderYears: OY });
-  check("the canonical is at its current version and seals every rung with its basis", cc.v === 14 && cc.oy && cc.oy.st === "confirmed" && cc.oy.r.length === 3 && cc.oy.r[0].kl === 11223 && cc.oy.r[0].kn === 5 && cc.oy.r[0].rd === 5 && cc.oy.r[0].to === "2026-08-18" && cc.oy.mk === "Lexus" && cc.oy.from === "2026-08-03", JSON.stringify(cc.oy).slice(0, 300));
+  check("the canonical is at its current version and seals every rung with its basis", cc.v === 15 && cc.oy && cc.oy.st === "confirmed" && cc.oy.r.length === 3 && cc.oy.r[0].kl === 11223 && cc.oy.r[0].kn === 5 && cc.oy.r[0].rd === 5 && cc.oy.r[0].to === "2026-08-18" && cc.oy.mk === "Lexus" && cc.oy.from === "2026-08-03", JSON.stringify(cc.oy).slice(0, 300));
   const viaVerify = olderYearsLine({ price: cc.price, oy: cc.oy, fcx: cc.fcx });
   check("the signed canonical round-trips the SAME lines (make, model, province, dates, dealers, ranges)", JSON.stringify(viaVerify.lines) === JSON.stringify(c.lines) && viaVerify.value === c.value && viaVerify.headline === c.headline && viaVerify.meta === c.meta, JSON.stringify(viaVerify.lines));
   const ccOut = canonicalReport({ ...A, quotedPrice: 69898, olderYears: { ...lo, make: "Lexus", model: "RX", province: "AB" } });

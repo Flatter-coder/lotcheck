@@ -260,7 +260,7 @@ check("the body cap leaves room for a real capture but is bounded",
   // made, not a diff that slid through. v13 adds `lvd`, the dollar total the
   // report now leads with in place of the 0-10 leverage gauge. Additive --
   // `leverage` and `lvn` are still projected, below.
-  check("canonical version is the current one", full.v === 14, String(full.v));
+  check("canonical version is the current one", full.v === 15, String(full.v));
   check("v12: the VIN check digit is still sealed", full.vck !== undefined, JSON.stringify(full.vck));
   check("v13: the dollar headline is sealed as lvd", "lvd" in full, JSON.stringify(Object.keys(full).slice(0, 8)));
   check("v13: the old leverage score is still projected, for reports already issued",

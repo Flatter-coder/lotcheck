@@ -299,6 +299,7 @@ function normMv(x) {
     condition: x.cd || null, dealers: x.d ?? null,
     make: x.mk || null, model: x.md || null, province: x.pv || null, seenMin: x.from || null, seenMax: x.to || null,
     nKept: x.nk ?? null, reason: x.rs || null,
+    sample: Array.isArray(x.rows) ? x.rows.map((r) => ({ price: r.p ?? null, km: r.k ?? null, year: r.y ?? null, trim: r.t || null, city: r.c || null, dealer: r.d || null, asOf: r.s || null })) : null,
   };
 }
 
