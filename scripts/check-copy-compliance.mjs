@@ -32,7 +32,7 @@ import { readFileSync } from "node:fs";
 // scratch that Vercel never serves, so they are deliberately out of scope.
 const SURFACES = [
   "app.html",
-  "public/index.html",
+  "public/home-classic.html",
   "public/privacy.html",
   "public/alberta.html",
   "public/dealer-portal.html",
@@ -202,7 +202,7 @@ const RULES = [
     // count change would have believed four report surfaces had been checked
     // when none was ever in the count.
     //
-    //   public/index.html          6  nav link ×2, "10-point pipeline",
+    //   public/home-classic.html   6  nav link ×2, "10-point pipeline",
     //                                 the section aria-label, the <h2>, the lede.
     //                                 Was 7: the #scan-cta caption ("...10-point
     //                                 verification lane") went with the section
@@ -237,7 +237,7 @@ const RULES = [
     // from 10 tiles to 16 — it was counting the CLAIM, never the thing claimed.
     // The structural assertion lives in `npm run check:points`, which reads the
     // arrays: App.jsx's ten pushes, tenPoints()'s ten, and the ten named in
-    // public/index.html must be the same ten in the same order, with any extras
+    // public/home-classic.html must be the same ten in the same order, with any extras
     // rendered under their own heading and never numbered as points.
     // Keep BOTH: this one catches a NEW use of the claim, that one catches the
     // claim drifting from the product. See [[ten-point-claim-policy]].

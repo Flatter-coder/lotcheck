@@ -76,6 +76,12 @@ jobs:
       # Ram, Dodge and Chrysler with SyntaxError.
       - name: Every script parses
         run: npm run check:syntax
+      # A rewrite whose source path is also a real file in public/ never runs:
+      # Vercel serves the file first. PR #537 routed / to app.html while
+      # public/index.html still existed; the deploy was green and the home page
+      # did not change. Fails when any literal rewrite is shadowed that way.
+      - name: No rewrite is shadowed by a file
+        run: npm run check:rewrites
       # check:syntax parses each file ALONE. A file whose own syntax is perfect
       # still throws on its first line if a module it imports has nothing by
       # that name -- which is exactly how night-watch.mjs landed on main unable

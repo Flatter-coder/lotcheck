@@ -160,10 +160,10 @@ console.log("\nthe emailed report");
     "every extra must still be printed — just not as a point");
 }
 
-// ── the advertisement (public/index.html) ──────────────────────────────────
+// ── the advertisement (public/home-classic.html; the old landing, still served) ──────────────────────────────────
 console.log("\nwhat we advertise");
 {
-  const src = read("public/index.html");
+  const src = read("public/home-classic.html");
   const ol = /<ol class="pipe-fallback">([\s\S]*?)<\/ol>/.exec(src);
   check("the landing page's fallback list exists", !!ol);
   if (ol) {
