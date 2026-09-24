@@ -45,6 +45,7 @@ export type FreightState =
   | "above"           // the listing charges more than the maker publishes
   | "listing_only"    // read the listing's figure; hold no published one
   | "published_only"  // hold a published figure; the listing states none
+  | "different_basis" // both known, but the maker's figure excludes PDI
   | "not_read";       // neither
 
 export interface FreightLine {
@@ -91,7 +92,8 @@ export function freightLine(a: any): FreightLine {
   const make = a?.make ? String(a.make) : null;
   const model = a?.model ? String(a.model) : null;
   const listing = listingFreight(a);
-  const pub = make && model ? freightFor(make, model) : null;
+  // The listing's own model year picks the figure: freight moves between years.
+  const pub = make && model ? freightFor(make, model, a?.year ?? null) : null;
   const published = pub ? pub.amount : null;
 
   const base = {
@@ -111,7 +113,7 @@ export function freightLine(a: any): FreightLine {
   if (listing == null && published != null) {
     return {
       ...base, state: "published_only", headline: money(published),
-      explain: `${make} publishes ${money(published)} for freight and PDI on this model. This listing does not state its own freight line, so there is nothing to compare it against — ask for the figure in writing before you agree a price.`,
+      explain: `${make} publishes ${money(published)} for ${pub?.covers === "freight_only" ? "destination (a figure it does not say includes PDI)" : "freight and PDI"} on this model. This listing does not state its own freight line, so there is nothing to compare it against — ask for the figure in writing before you agree a price.`,
     };
   }
 
@@ -119,6 +121,18 @@ export function freightLine(a: any): FreightLine {
     return {
       ...base, state: "listing_only", headline: money(listing),
       explain: `This listing charges ${money(listing)} for freight and PDI. We hold no published figure from ${make || "the manufacturer"} for this model, so we are not comparing it to anything — ask the dealer to show you the manufacturer's own number.`,
+    };
+  }
+
+  // Both known -- but maybe not the same line. A maker that publishes a
+  // destination figure without saying it includes PDI (Porsche's "Destination
+  // Charge", Ford's "destination & delivery") is not necessarily stating what a
+  // listing's "Freight and PDI" line holds, and a gap between them may be PDI,
+  // not anything to question. Name both, compare neither.
+  if (pub && pub.covers === "freight_only") {
+    return {
+      ...base, state: "different_basis", headline: money(listing as number),
+      explain: `${make} publishes ${money(published as number)} for destination on this model and does not say that figure includes pre-delivery inspection. This listing charges ${money(listing as number)} for freight and PDI, so the two may not be the same line and we have not compared them. Ask the dealer to show freight and PDI separately.`,
     };
   }
 
