@@ -27,6 +27,81 @@ the next instance.
 ---
 ---
 
+## 2026-09-24 — a dealer group's whole inventory, credited to one Audi store
+
+**Shapes:** A field read from the wrong node · A key built on a mutable name
+
+### What happened
+
+`fn_market_comps` (public, anon key) for a new 2026 Toyota RAV4 in Alberta
+returned 10 rows, all "AUDI EDMONTON NORTH, Edmonton". For a used 2024 RAV4
+(+/-1 year) it returned 22 rows: 11 from that "Audi" store, two of them the
+same cars Canyon Creek Toyota lists (2024 Trail $44,888 21,663 km; 2025 XLE
+$42,900 20,754 km), and 3 named "N/A". The value band double-counted cars, and
+the named comps table would have printed a real business beside cars it does
+not sell.
+
+### Why
+
+`dealer_source` 22 is `https://www.jpautogroup.com`, the Jim Pattison Auto
+Group site: one Convertus sitemap enumerating every rooftop in the group, with
+2,800 live units across 30 makes, BC stores included. AMVIC lists that website for two
+licensees (AUDI EDMONTON NORTH; CANYON CREEK TOYOTA (2018)). Two readers each
+trusted a field that describes a different entity:
+
+1. `discover-dealer-feeds` named a host after the **first** AMVIC licensee
+   listing it (by id order), and copied `trade_name` verbatim, so AMVIC's
+   `"N/A"` placeholder became five dealers' names.
+2. The crawl credited **every** VDP in a host's sitemap to that host's row. Each
+   Convertus VDP declares its own rooftop (`company_data`), and it was never read.
+
+It is not one host. Live VINs listed at two or more dealers on 2026-09-24: 1,082
+(2,213 rows). Okotoks GM + Shaw GMC share 967; Lakewood Chev + Sherwood Buick
+GMC + Sherwood Park Chev share 49; jpautogroup + Canyon Creek share 61. And the
+report's dealer count keyed on the display name, so every nameless dealer in
+one city counted as one.
+
+### Fix
+
+`ef9c0c9`:
+- `20260924_comps_attribution.sql`: adds `dealer_source.group_feed`, then flags
+  and deactivates jpautogroup.com. Adds `fn_comp_pool`, the one pool both
+  named-dealer RPCs (`fn_market_comps`, `fn_comparable_listings`) now read:
+  - group feeds are excluded;
+  - one row per VIN;
+  - one row per used car by year + trim + price + exact km (at 1,000 km or more; new cars are
+    not keyed this way, because ten identical new XLEs are ten cars);
+  - a car listed by more than one dealer keeps its price but loses its
+    dealer name, city and key;
+  - "N/A" is never printed as a name.
+
+  Nothing is deleted.
+- `market-count.js` `dealersOfRows`: one dealer count for every card, keyed on
+  `dealerKey`, and no number at all when any row's dealer is unknown.
+- `lib/amvic-hosts.mjs` `licenseeName` + `rooftopsByHost`, used by both
+  catalogue scripts. A host shared by more than one rooftop gets no name, and
+  `discover-dealer-feeds` refuses to seed it.
+
+### Guard
+
+- `rooftopGate` in `crawl-alberta-inventory.mjs` refuses a whole section,
+  credits nothing, and writes the reason to `last_error` when either:
+  - its units name more than one rooftop; or
+  - they name one rooftop in another city or province than the dealer row.
+
+  `test:convertus-crawl` replays the jpautogroup case.
+- `test:amvic-match` locks host grouping with the real AMVIC rows: jpautogroup,
+  Adams GM (one name, two cities), West Edmonton VW (two licences, one
+  rooftop) and "N/A".
+- The migration's `@assert`s re-check the live RPC after apply: no VIN twice,
+  no AUDI EDMONTON NORTH RAV4, the Trail duplicate appears once, and no "N/A".
+  Trial-applied inside a rolled-back transaction before the PR: all 5 true;
+  new 2026 RAV4 10 rows -> 0; used 2024 RAV4 22 -> 11.
+
+Still open: the 2,800 group-feed rows are still in `vehicle_listing`, where the
+aggregate counters still see them (`inventory_daily_counts`, `top_days_on_lot`,
+crawl coverage). Removing them is the owner's decision.
+
 ## 2026-09-24 — the home page rewrite shipped green and changed nothing
 
 **Shapes:** Green signal, no check
