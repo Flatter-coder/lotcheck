@@ -255,6 +255,12 @@ jobs:
         run: npm run test:catalog-quality
       - name: Catalog model names resolve (no nameplate inherits a sibling powertrain)
         run: npm run test:reachable
+      # Subaru launch-pricing capture (no Build & Price scraper exists for
+      # Subaru): reads subaru.ca's own newsroom and pulls the manufacturer's
+      # own pricing-table when a release matches a known model + year. Refuses
+      # far more than it extracts on purpose — see scripts/lib/press-pricing.mjs.
+      - name: Press-release pricing capture (Subaru; refuses rather than guesses)
+        run: npm run test:press-pricing
       # The dealer-fee-ceiling flag: fires ONLY for a new vehicle of a captured
       # make in-province; never a used car, an uncaptured make, or a fee under
       # the ceiling. A wrong fee claim against a named dealer is what this guards.
