@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Offline assertions for aggregateDailyCounts — no database in the loop.
 // Run: npm run test:inventory-daily
-import { aggregateDailyCounts, aggregateByCity, PLAUSIBLE_MAX_PER_DEALER_PER_CONDITION } from "./lib/inventory-daily.mjs";
+import { aggregateDailyCounts, aggregateByCity, countCars, PLAUSIBLE_MAX_PER_DEALER_PER_CONDITION } from "./lib/inventory-daily.mjs";
 
 let pass = 0, fail = 0;
 function ok(label, cond) {
@@ -75,6 +75,36 @@ function ok(label, cond) {
 {
   const rows = aggregateByCity([], new Map());
   ok("no counts means no city rows", rows.length === 0);
+}
+
+// 8) countCars: the 2026-09-24 shape. One car on two dealers' sites is one car;
+//    it belongs to a city only when both dealers are in it; a car one dealer
+//    calls new and the other used is in neither total. 8 listings, 4 counted.
+{
+  const dealerCityKey = new Map([[1, "calgary"], [2, "calgary"], [9, "okotoks"]]);
+  const { counts, disputed } = countCars([
+    { dealer_id: 1, dealer_ids: [1], condition: "used" },
+    { dealer_id: 1, dealer_ids: [1], condition: "used" },
+    { dealer_id: null, dealer_ids: [1, 2], condition: "used" },
+    { dealer_id: null, dealer_ids: [2, 9], condition: "new" },
+    { dealer_id: null, dealer_ids: [2, 9], condition: null },
+  ], dealerCityKey);
+  const r = aggregateDailyCounts(counts);
+  ok("a car listed by two dealers counts once", r.usedRaw === 3 && r.newRaw === 1);
+  ok("a car the dealers disagree on is disputed, in neither total", disputed === 1);
+  const rows = aggregateByCity(counts, dealerCityKey);
+  const calgary = rows.find((x) => x.cityKey === "calgary");
+  ok("a same-city shared car counts in that city", calgary && calgary.usedVerified === 3);
+  ok("a shared car's dealers are both seen in the city", calgary && calgary.dealersSeen === 2);
+  ok("a car listed in two cities counts in neither", rows.length === 1 && !rows.some((x) => x.cityKey === "okotoks"));
+}
+
+// 9) the cap is a per-DEALER test; cars shared by several dealers are not one feed.
+{
+  const r = aggregateDailyCounts([
+    { dealerId: null, shared: true, cityKey: null, dealerIds: new Set([29, 68]), condition: "new", n: PLAUSIBLE_MAX_PER_DEALER_PER_CONDITION + 1 },
+  ]);
+  ok("a shared row over the cap is still verified", r.newVerified === PLAUSIBLE_MAX_PER_DEALER_PER_CONDITION + 1 && r.dealersFlagged === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

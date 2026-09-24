@@ -18,8 +18,42 @@
 export const PLAUSIBLE_MAX_PER_DEALER_PER_CONDITION = 1500;
 
 /**
+ * cars: one row per car from fn_listing_once(p_day) -- { dealer_id, dealer_ids,
+ * condition }. dealer_id is null when more than one dealer lists the car.
+ *
+ * Returns { counts, disputed }: counts in the shape aggregateDailyCounts and
+ * aggregateByCity take. A car listed by more than one dealer counts ONCE, in a
+ * `shared` row credited to no dealer (and so outside the per-dealer cap, which
+ * exists to catch one feed carrying a group), and to a city only when every
+ * dealer listing it is in that city. A car whose dealers disagree on new vs
+ * used has a null condition: it is counted in `disputed`, in neither total.
+ */
+export function countCars(cars, dealerCityKey, dealerName = new Map()) {
+  const byKey = new Map();
+  let disputed = 0;
+  for (const c of cars) {
+    if (!c.condition) { disputed++; continue; }
+    const shared = c.dealer_id == null;
+    const ids = c.dealer_ids || [];
+    const cities = shared ? new Set(ids.map((id) => dealerCityKey.get(id) ?? null)) : null;
+    const cityKey = cities?.size === 1 ? [...cities][0] : null;
+    const k = shared ? `shared|${cityKey ?? ""}|${c.condition}` : `${c.dealer_id}|${c.condition}`;
+    if (!byKey.has(k)) {
+      byKey.set(k, shared
+        ? { dealerId: null, dealerName: null, shared: true, cityKey, dealerIds: new Set(), condition: c.condition, n: 0 }
+        : { dealerId: c.dealer_id, dealerName: dealerName.get(c.dealer_id), condition: c.condition, n: 0 });
+    }
+    const row = byKey.get(k);
+    row.n++;
+    if (shared) for (const id of ids) row.dealerIds.add(id);
+  }
+  return { counts: [...byKey.values()], disputed };
+}
+
+/**
  * counts: [{dealerId, dealerName, condition: "new"|"used", n: number}, ...]
- * one row per (dealer, condition) pair seen this day.
+ * one row per (dealer, condition) pair seen this day, plus countCars' shared
+ * rows (cars more than one dealer lists).
  *
  * Returns { newRaw, newVerified, usedRaw, usedVerified, dealersFlagged, notes }.
  */
@@ -30,7 +64,7 @@ export function aggregateDailyCounts(counts) {
     const n = Number(row.n) || 0;
     const isNew = row.condition === "new";
     if (isNew) newRaw += n; else usedRaw += n;
-    if (n > PLAUSIBLE_MAX_PER_DEALER_PER_CONDITION) {
+    if (!row.shared && n > PLAUSIBLE_MAX_PER_DEALER_PER_CONDITION) {
       flagged.push({ dealerId: row.dealerId, dealerName: row.dealerName, condition: row.condition, n });
       continue; // excluded from *_verified — see the cap comment above
     }
@@ -61,7 +95,7 @@ export function aggregateDailyCounts(counts) {
 export function aggregateByCity(counts, dealerCityKey) {
   const byCity = new Map();
   for (const c of counts) {
-    const ck = dealerCityKey.get(c.dealerId);
+    const ck = c.shared ? c.cityKey : dealerCityKey.get(c.dealerId);
     if (!ck) continue;
     if (!byCity.has(ck)) byCity.set(ck, []);
     byCity.get(ck).push(c);
@@ -69,7 +103,7 @@ export function aggregateByCity(counts, dealerCityKey) {
   const out = [];
   for (const [ck, cityCounts] of byCity) {
     const agg = aggregateDailyCounts(cityCounts);
-    const dealersSeen = new Set(cityCounts.map((c) => c.dealerId)).size;
+    const dealersSeen = new Set(cityCounts.flatMap((c) => (c.shared ? [...c.dealerIds] : [c.dealerId]))).size;
     out.push({ cityKey: ck, dealersSeen, ...agg });
   }
   return out;

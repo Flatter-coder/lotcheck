@@ -312,6 +312,10 @@ jobs:
         run: npm run test:apr-reference
       - name: "Inventory counts RPC: aggregates only, and a delisting is never a sale"
         run: npm run test:inventory-counts
+      # One car on two dealers' sites is one car: every aggregate over live
+      # inventory reads fn_listing_once, the one place that rule is written.
+      - name: "Inventory aggregates count a car once, group feeds excluded"
+        run: npm run test:car-once
       # Two rules about how catalog data reaches Supabase. Every scraper must
       # write through writeCatalogs(), because three bare awaits mean an MSRP
       # refusal silently discards the finance and lease rows already in hand --

@@ -41,12 +41,14 @@ async function main() {
 
   const today = new Date().toISOString().slice(0, 10);
   const observed = r.newest_observation;
-  console.log("Inventory, last 24h");
-  console.log(`  listings tracked        ${r.listings_total}`);
-  console.log(`  live now                ${r.listings_live} across ${r.dealers_live} dealers`);
+  // Every figure is CARS (one per VIN, group feeds excluded), not listings:
+  // a car on two dealers' sites is one car. 20260924b_count_a_car_once.sql.
+  console.log("Inventory, last 24h (cars, each counted once)");
+  console.log(`  cars tracked            ${r.listings_total}`);
+  console.log(`  live now                ${r.listings_live} cars across ${r.dealers_live} dealers`);
   console.log(`  first seen in 24h       ${r.first_seen_24h}`);
   console.log(`  stopped appearing       ${r.delisted_24h}   (a delisting is not a sale)`);
-  console.log(`  price changes in 24h    ${r.price_moves_24h}`);
+  console.log(`  price changed in 24h    ${r.price_moves_24h}`);
   console.log(`  newest observation      ${observed || "never"}`);
   if (observed !== today) {
     console.log("");

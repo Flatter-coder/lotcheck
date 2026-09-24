@@ -80,6 +80,7 @@
     "test:pdf-text": "node scripts/test-pdf-text.mjs",
     "test:apr-reference": "node --experimental-strip-types scripts/test-apr-reference.mjs",
     "test:inventory-counts": "node scripts/test-inventory-counts.mjs",
+    "test:car-once": "node scripts/test-car-once.mjs",
     "test:bp-summary": "node scripts/test-bp-summary.mjs",
     "test:tci-overrides": "node scripts/test-tci-overrides.mjs",
     "test:robots": "node scripts/test-robots.mjs",

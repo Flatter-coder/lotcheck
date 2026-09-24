@@ -5,20 +5,24 @@
 // exists: it may leak nothing about a specific car, and it may never describe a
 // disappearance as a sale. Both are properties of the SQL text, so both are
 // checked against the SQL text rather than against a description of it.
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+//
+// The text checked is the LAST migration to define the function (see
+// lib/migration-defs.mjs). Until 2026-09-24 this read the file NAMED after it,
+// which a redefinition in 20260924b_count_a_car_once.sql would have left
+// passing on a body that no longer runs.
+import { latestDefinition } from "./lib/migration-defs.mjs";
 
-const DIR = "supabase/migrations";
-const FILE = readdirSync(DIR).find(f => f.includes("inventory_daily_counts"));
+const DEF = latestDefinition("inventory_daily_counts");
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
   if (ok) { pass++; console.log(`PASS  ${name}`); }
   else { fail++; console.log(`FAIL  ${name}${detail ? " — " + detail : ""}`); }
 };
 
-check("the migration exists", !!FILE, "no migration matching inventory_daily_counts");
-if (!FILE) { console.log("\n0 passed, 1 failed"); process.exit(1); }
-const sql = readFileSync(join(DIR, FILE), "utf8");
+check("the migration exists", !!DEF, "no migration defines inventory_daily_counts");
+if (!DEF) { console.log("\n0 passed, 1 failed"); process.exit(1); }
+console.log(`(checking ${DEF.file})`);
+const sql = DEF.sql;
 const lower = sql.toLowerCase();
 // Comments are prose, not behaviour. Every structural check below runs against
 // the executable SQL only — commenting a line out must read as removing it.

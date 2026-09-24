@@ -27,6 +27,104 @@ the next instance.
 ---
 ---
 
+## 2026-09-24 — one car, counted once per dealer site in every aggregate
+
+**Shapes:** One-surface fix · A check run at the wrong moment
+
+### What happened
+
+The entry below fixed the comps RPCs so a car listed by two dealers counts
+once. Every other counter still summed rows. On 2026-09-24, 1,082 live VINs
+(2,213 rows) sat on two or three dealers' sites, and the jpautogroup group
+feed's 2,800 rows were still in every total:
+
+- `inventory_daily_counts`: `listings_live` 11,588 rows for 7,720 cars.
+- `fn_crawl_coverage` (the public /crawl card): `totalUsed` 4,428 for 2,688.
+  Calgary alone read 1,909 used, 949 real.
+- `fn_alberta_msrp_deviation`: n = 4,476 for 1,624.
+- `top_days_on_lot('Edmonton')`: the whole top 5 were group-feed Konas.
+- `fn_admin_lot_leverage_summary`, `build-city-price-index.mjs` and
+  `build-alberta-inventory-daily.mjs` summed rows the same way.
+
+`fn_comp_pool` had its own gap. It deduped VINs only inside its
+make/model/condition filter. Okotoks GM lists 842 shared GM cars as new;
+Shaw GMC lists the same cars as used. Each dealer's copy was alone in its
+own filter. So every one of those cars appeared twice: in the new pool under
+Okotoks' name, and in the used pool under Shaw's.
+
+### Why
+
+The rule "one VIN is one car" had one author for two readers, and none for
+the rest. #540 found the duplicates while fixing the comps, and fixed them
+in the comps only. Its own log entry lists the counters as "still open".
+
+A second gap: `test:inventory-counts` read the migration **named**
+`inventory_daily_counts`. It did not read the last migration to **define**
+that function. Any redefinition would have left the gate checking SQL that
+no longer runs.
+
+The clusters, read-only from the live database:
+
+- **okotoksgm.com (29) + shawgmc.com (68)**, 967 VINs. 958 of them have the
+  same stock number on both sites. Both feeds carry three stock-number codes:
+  OG, SG and CG. Each code covers Chevrolet, Buick and GMC, so the codes mark
+  rooftops, not makes. Both hosts publish one shared multi-rooftop GM pool,
+  and neither is the rooftop for a shared car.
+- **lakewoodchev.com (9) + sherwoodbuickgmc.com (32) + sherwoodparkchev.com
+  (33)**, 49 used cars. All three sites use the same stock numbers. 32 and 33
+  list nothing else, so this is a shared used pool. Last observed 2026-08-18.
+- **jpautogroup.com (22) + canyoncreektoyota.com (6)**: 22 is the group feed.
+  It carries 15 new-car makes, and AMVIC lists the site for two licensees.
+  6 is the rooftop: Toyota only, and AMVIC lists its own site for it.
+- `first_seen_on` order settles none of the three. It follows the date each
+  host was added to `dealer_source`.
+
+### Fix
+
+PR #541 (`81d6029` before squash):
+- `20260924b_count_a_car_once.sql` adds `fn_listing_once(p_day)`, the one
+  definition of "a car on sale". Its rules:
+  - group feeds are excluded;
+  - one row per VIN;
+  - `dealer_id`, city, province and condition are filled only when every
+    dealer listing the car agrees;
+  - `dealer_ids` always lists every dealer, so dealer counts stay right;
+  - a car is damaged if any listing says so.
+
+  The five aggregates and `fn_comp_pool` now read it. It is revoked from anon,
+  because it returns VINs.
+
+  A car whose dealers disagree on new vs used goes in neither bucket. That
+  rule currently holds 843 cars, 842 of them the Okotoks/Shaw cars.
+- Both scripts read the helper through PostgREST. The daily report states
+  its shared and disputed counts in `notes`, instead of dropping them without
+  a word.
+- `inventory_daily_counts` counts changes by distinct VIN: first seen,
+  delisted and price moves. "First seen" means first seen at any dealer.
+
+Nothing was applied, deleted or flagged. Both migrations were trial-applied
+together in a rolled-back transaction against live data, and all 11
+post-conditions held. The 5 new ones returned false against #540 alone.
+
+### Guard
+
+- `test:car-once` reads the last migration to define each reader. It fails
+  if any of them stops calling `fn_listing_once`, or goes back to counting
+  raw `vehicle_listing` rows. It also fails if the helper stops excluding
+  group feeds or becomes callable by anon. With the new migration moved
+  aside, 17 of its 20 checks fail.
+- `lib/migration-defs.mjs` `latestDefinition()`. `test:inventory-counts` now
+  uses it.
+- The migration's `@assert`s compare each counter with a count written
+  without the helper.
+
+Still open, each the owner's call:
+- Which `group_feed` flags to set on the Okotoks/Shaw and Sherwood/Lakewood
+  hosts.
+- Shaw's jsonld_itemlist rows are all labelled `used`, yet 964 of 1,248 show
+  under 200 km.
+- The public `fn_market_comps` now takes about 65 ms per call, up from a few.
+
 ## 2026-09-24 — a dealer group's whole inventory, credited to one Audi store
 
 **Shapes:** A field read from the wrong node · A key built on a mutable name

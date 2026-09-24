@@ -11,12 +11,17 @@
 // direct database fact, unlike re-parsing a GitHub Actions log line, which is
 // how this same class of number went wrong before. [[verify-in-production-before-done]]
 //
+// COUNTED ONCE PER CAR. The observations are read through
+// fn_listing_once(p_day) (20260924b_count_a_car_once.sql): one row per VIN,
+// group feeds excluded. On 2026-09-24, 1,082 cars were live on two or three
+// dealers' sites and this report counted each of them once per site.
+//
 // A day with zero observations writes NOTHING and exits non-zero — a crawl
 // that did not run, or ran dry, must never be read as "zero cars for sale in
 // Alberta today". [[report-never-empty]] [[catalog-refresh-can-empty-catalog]]
 import { createClient } from "@supabase/supabase-js";
 import { issuedAmvicHosts } from "./lib/amvic-hosts.mjs";
-import { aggregateDailyCounts, aggregateByCity } from "./lib/inventory-daily.mjs";
+import { aggregateDailyCounts, aggregateByCity, countCars } from "./lib/inventory-daily.mjs";
 // Reused, not reimplemented: dealer_source.city is free text off two rosters
 // (AMVIC + OSM), so "St. Albert" / "ST. ALBERT" / "Saint Albert" are the same
 // place under three spellings. build-city-price-index.mjs already solved
@@ -41,12 +46,14 @@ function parseArgs() {
 // exact shape of the 2026-09-07 defect that undercounted this report by
 // Shaw's entire ~10,000-unit block — orderCol is now REQUIRED, not optional,
 // so a future caller cannot reintroduce the same bug by omission.
-async function pageAll(supabase, table, cols, orderCol, filterFn) {
+// rpcArgs set = `table` is a set-returning function, read the same way.
+async function pageAll(supabase, table, cols, orderCol, filterFn, rpcArgs) {
   if (!orderCol) throw new Error(`pageAll(${table}): orderCol is required — unordered pagination silently drops rows`);
   const out = [];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
-    let q = supabase.from(table).select(cols).order(orderCol, { ascending: true }).range(from, from + PAGE - 1);
+    const base = rpcArgs ? supabase.rpc(table, rpcArgs).select(cols) : supabase.from(table).select(cols);
+    let q = base.order(orderCol, { ascending: true }).range(from, from + PAGE - 1);
     if (filterFn) q = filterFn(q);
     const { data, error } = await q;
     if (error) throw new Error(`could not read ${table}: ${error.message}`);
@@ -63,7 +70,8 @@ async function main() {
   if (!url || !key) { console.error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required"); process.exit(1); }
   const supabase = createClient(url, key);
 
-  const dealers = await pageAll(supabase, "dealer_source", "id,name,active,city", "id", (q) => q.eq("active", true));
+  // A group feed is not a dealer: it is neither counted nor reported silent.
+  const dealers = await pageAll(supabase, "dealer_source", "id,name,active,city", "id", (q) => q.eq("active", true).eq("group_feed", false));
   const dealerName = new Map(dealers.map((d) => [d.id, d.name]));
 
   // dealerId -> normalized cityKey (or null for dealers with no city --
@@ -78,54 +86,46 @@ async function main() {
     if (ck) { if (!cityVariants.has(ck)) cityVariants.set(ck, []); cityVariants.get(ck).push(d.city); }
   }
 
-  // listing_observation.observed_on = day, joined to vehicle_listing for
-  // dealer and condition. Supabase's embedded-resource select does the join
-  // in one round trip. Ordered by listing_id -- the table's own PK has no
-  // surrogate id column, and observed_on is already pinned by the filter, so
-  // listing_id alone gives a stable, gap-free page boundary.
-  const observations = await pageAll(
-    supabase, "listing_observation",
-    "listing_id,vehicle_listing!inner(dealer_id,condition)",
-    "listing_id",
-    (q) => q.eq("observed_on", day)
+  // One row per CAR observed on `day` (listing_observation), group feeds
+  // excluded: fn_listing_once(p_day). Ordered by vin, which it returns once
+  // each, so the page boundary is stable and gap-free.
+  const cars = await pageAll(
+    supabase, "fn_listing_once", "vin,dealer_id,dealer_ids,condition,first_seen_on",
+    "vin", null, { p_day: day }
   );
 
-  // A STANDING CROSS-CHECK, not a one-time fix. Compares the paged, joined
-  // read above against a plain HEAD count of the same filter with no join and
-  // no pagination involved. If a future change to the join, the embed syntax,
-  // or the pagination reintroduces a gap, THIS throws instead of silently
-  // writing a low number as if it were the truth. [[no-single-point-of-failure]]
-  const rawCount = await supabase.from("listing_observation").select("*", { count: "exact", head: true }).eq("observed_on", day);
-  if (rawCount.error) throw new Error(`could not count listing_observation: ${rawCount.error.message}`);
-  if (rawCount.count !== observations.length) {
+  // A STANDING CROSS-CHECK, not a one-time fix. Compares the paged read above
+  // against a plain HEAD count of the same call with no pagination involved.
+  // If a future change to the pagination reintroduces a gap, THIS throws
+  // instead of silently writing a low number as if it were the truth.
+  // [[no-single-point-of-failure]]
+  const rawCount = await supabase.rpc("fn_listing_once", { p_day: day }, { count: "exact", head: true });
+  if (rawCount.error) throw new Error(`could not count fn_listing_once: ${rawCount.error.message}`);
+  if (rawCount.count !== cars.length) {
     throw new Error(
-      `listing_observation read mismatch for ${day}: paged+joined query returned ${observations.length} rows, ` +
+      `fn_listing_once read mismatch for ${day}: paged query returned ${cars.length} cars, ` +
       `a plain count says ${rawCount.count}. Refusing to write a report that may be undercounting. ` +
       `(This is the exact defect class that undercounted 2026-09-07 by Shaw's entire block.)`
     );
   }
 
-  if (!observations.length) {
+  if (!cars.length) {
     console.error(`No listing_observation rows for ${day} — no crawl ran (or it was --dry-run). Writing nothing.`);
     process.exit(1);
   }
 
-  // group -> one row per (dealer, condition)
-  const grouped = new Map(); // key "dealerId|condition" -> n
-  for (const o of observations) {
-    const vl = o.vehicle_listing;
-    if (!vl || !vl.condition) continue;
-    const k = `${vl.dealer_id}|${vl.condition}`;
-    grouped.set(k, (grouped.get(k) || 0) + 1);
-  }
-  const counts = [...grouped.entries()].map(([k, n]) => {
-    const [dealerId, condition] = k.split("|");
-    return { dealerId: Number(dealerId), dealerName: dealerName.get(Number(dealerId)), condition, n };
-  });
+  // one row per (dealer, condition), plus one per (shared, city, condition)
+  // for cars more than one dealer lists -- see countCars.
+  const { counts, disputed } = countCars(cars, dealerCityKey, dealerName);
 
   const agg = aggregateDailyCounts(counts);
-  const seenIds = new Set(counts.map((c) => c.dealerId));
+  const seenIds = new Set(cars.flatMap((c) => c.dealer_ids || []));
   const dealersSeen = seenIds.size;
+  const sharedCars = cars.filter((c) => c.dealer_id == null).length;
+  if (sharedCars) console.log(`  ${sharedCars} car(s) listed by more than one dealer, counted once each.`);
+  const disputedNote = disputed
+    ? `${disputed} car(s) have no agreed condition (new on one dealer's site, used on another's) and are in neither the new nor the used count.`
+    : null;
 
   // NAME THE DEALERS WITH ZERO OBSERVATIONS TODAY, don't just subtract them
   // silently into "8 dealers not seen". An active dealer with no observation
@@ -145,14 +145,19 @@ async function main() {
       silentDealers.map((d) => d.name ?? `dealer ${d.id}`).join(", ") + "."
     : null;
 
-  const [arrivedRes, delistedRes, pricedRes] = await Promise.all([
-    supabase.from("vehicle_listing").select("id", { count: "exact", head: true }).eq("first_seen_on", day),
-    supabase.from("vehicle_listing").select("id", { count: "exact", head: true }).eq("delisted_on", day),
-    supabase.from("listing_price_history").select("id", { count: "exact", head: true }).eq("observed_on", day),
+  // Cars, not rows, here too. fn_listing_once's first_seen_on is the earliest
+  // first sighting across every listing of the car seen today, so a car
+  // reaching a second site while still on the first is not an arrival.
+  // Delistings and price moves are distinct VINs outside group feeds.
+  const arrived = cars.filter((c) => c.first_seen_on === day).length;
+  const [delistedRows, pricedRows] = await Promise.all([
+    pageAll(supabase, "vehicle_listing", "id,vin,dealer_source!inner(group_feed)", "id",
+      (q) => q.eq("delisted_on", day).eq("dealer_source.group_feed", false)),
+    pageAll(supabase, "listing_price_history", "id,vehicle_listing!inner(vin,dealer_source!inner(group_feed))", "id",
+      (q) => q.eq("observed_on", day).eq("vehicle_listing.dealer_source.group_feed", false)),
   ]);
-  for (const [label, res] of [["arrived", arrivedRes], ["delisted", delistedRes], ["price_events", pricedRes]]) {
-    if (res.error) throw new Error(`could not count ${label}: ${res.error.message}`);
-  }
+  const delisted = new Set(delistedRows.map((r) => r.vin)).size;
+  const priceEvents = new Set(pricedRows.map((r) => r.vehicle_listing.vin)).size;
 
   let amvicHosts = null;
   try { amvicHosts = (await issuedAmvicHosts(supabase)).size; }
@@ -169,10 +174,10 @@ async function main() {
     new_units_verified: agg.newVerified,
     used_units_raw: agg.usedRaw,
     used_units_verified: agg.usedVerified,
-    arrived: arrivedRes.count ?? 0,
-    delisted: delistedRes.count ?? 0,
-    price_events: pricedRes.count ?? 0,
-    notes: [agg.notes, silentNote].filter(Boolean).join(" ") || null,
+    arrived,
+    delisted,
+    price_events: priceEvents,
+    notes: [agg.notes, disputedNote, silentNote].filter(Boolean).join(" ") || null,
   };
 
   console.log(`[${day}] ${dealersSeen} dealers seen (${agg.dealersFlagged} flagged).`);
