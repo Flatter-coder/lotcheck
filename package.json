@@ -170,7 +170,8 @@
     "test:warranty-verify": "node scripts/test-warranty-verify.mjs",
     "test:place-match": "node scripts/test-place-match.mjs",
     "test:dealer-place": "node scripts/test-dealer-place.mjs",
-    "test:vehicle-faults": "node scripts/test-vehicle-faults.mjs"
+    "test:vehicle-faults": "node scripts/test-vehicle-faults.mjs",
+    "test:report-cards": "node --experimental-strip-types scripts/test-report-cards.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
