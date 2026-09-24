@@ -27,6 +27,50 @@ the next instance.
 ---
 ---
 
+## 2026-09-24 — the home page rewrite shipped green and changed nothing
+
+**Shapes:** Green signal, no check
+
+### What happened
+
+PR #537 (merge `7ce7fb1`) moved the home page to the React welcome screen by
+changing one rewrite in `vercel.json`: `/ -> /index.html` became
+`/ -> /app.html`. Every check passed, the Vercel production deploy reported
+`success`, and lotcheck.ca kept serving the old static landing page.
+
+### Why
+
+Vercel serves a real file from the output **before** it consults `rewrites`.
+`public/index.html` still existed, so a request for `/` matched the file and
+the rewrite never ran. The old `/ -> /index.html` rule had only ever worked
+because it pointed at the file that was going to win anyway.
+
+Nothing in the pipeline could see it: the gates test code, the deploy reports
+that it uploaded, and a local build served with a hand-written static server
+applies the rewrite the way the config *reads*, not the way Vercel *runs* it.
+It was caught only by fetching the live `/` after the deploy and finding the
+old bundle-less page.
+
+### Fix
+
+`ce83aa6` (merge `5e691a1`, PR #538): `public/index.html` moved to
+`public/home-classic.html` (kept, still served); the three gates that read the
+landing page's advertised checks now read the new path; `sw.js` stops
+precaching `/index.html` (its `addAll` would reject and the worker would never
+install) and bumps its cache to `lotcheck-v2`.
+
+### Guard
+
+`3abe70a`: `npm run check:rewrites` (`scripts/check-rewrites-not-shadowed.mjs`,
+in `gates.yml`). For every rewrite with a literal source it resolves the file
+Vercel would serve for that path and fails if `public/` has it. Proven both
+ways: green on the fixed tree, and `FAIL rewrite / -> /app.html never runs:
+public/index.html exists` with the old file restored. Self-tests keep it from
+passing by construction.
+
+Process: a routing change is not done until the live URL is fetched and shows
+the new bundle. CLAUDE.md now says never to put an `index.html` in `public/`.
+
 ## 2026-09-22 — the deploy said SUCCESS without ever asking what it shipped
 
 **Shapes:** Green signal, no check
