@@ -64,6 +64,48 @@ export interface MarketValue {
   model?: string | null;
   province?: string | null;       // the province the rows were read in
   reason?: string | null;         // why no comparison is made (e.g. "basis_missing", set by invariants)
+  // The listings themselves (2026-09-24, canonical v15). The report's compare
+  // and shortlist pages print them, so they are SEALED with the figures they
+  // stand behind -- never re-read at PDF time, which would put a second author
+  // on the same fact. Up to SAMPLE_MAX of the kept rows, closest in odometer to
+  // the subject. [[two-authors-per-fact]]
+  sample?: MarketSampleRow[] | null;
+}
+
+export interface MarketSampleRow {
+  price: number;
+  km: number | null;
+  year: number | null;
+  trim: string | null;
+  city: string | null;
+  dealer: string | null;   // null when more than one dealer lists the car (fn_comp_pool leaves it unnamed)
+  asOf: string | null;     // the date this listing was last read
+}
+
+// Vic, 2026-09-24: "5 or 7 comparisons". Seven is also what fits a printed page.
+export const SAMPLE_MAX = 7;
+
+/** The listings a report prints: closest in odometer to the subject (cheapest
+ *  first on a tie, or when the subject has no odometer), then shown by price. */
+export function sampleOf(rows: any[], subjectKm?: number | null, max = SAMPLE_MAX): MarketSampleRow[] {
+  const km = Number(subjectKm);
+  const hasKm = Number.isFinite(km) && km > 0;
+  const dist = (r: any) => (hasKm && r?.odometerKm != null && Number.isFinite(Number(r.odometerKm)) ? Math.abs(Number(r.odometerKm) - km) : Number.MAX_SAFE_INTEGER);
+  const noName = (v: any) => !v || /^\s*n\/?a\s*$/i.test(String(v));
+  return (Array.isArray(rows) ? rows : [])
+    .filter((r) => Number(r?.price) > 0)
+    .sort((a, b) => (hasKm ? dist(a) - dist(b) : 0) || Number(a.price) - Number(b.price))
+    .slice(0, max)
+    .map((r) => ({
+      price: Number(r.price),
+      km: r.odometerKm != null && Number.isFinite(Number(r.odometerKm)) ? Number(r.odometerKm) : null,
+      year: Number(r.year) > 0 ? Number(r.year) : null,
+      trim: r.trim ? String(r.trim) : null,
+      city: r.city ? String(r.city) : null,
+      dealer: noName(r.dealerName) ? null : String(r.dealerName),
+      asOf: r.asOf ? String(r.asOf) : null,
+    }))
+    .sort((a, b) => a.price - b.price);
 }
 
 // The CPO "fee" is a market PREMIUM, not a line item: what a certified car costs
@@ -497,6 +539,7 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
       nRead: pool.rows.length,
       nKept: band.n,
       ...basisOf(kept),
+      sample: sampleOf(kept, mileage),
     };
     // CPO premium: only for a certified subject, against the NON-certified comps
     // in the same pool. computeCpoPremium is min-comps gated and returns a
