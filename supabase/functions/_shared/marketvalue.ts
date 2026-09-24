@@ -26,7 +26,7 @@
 // count line (market-count.js), so the two cards never disagree on one report.
 import { vinShapeOrNull } from "./vin.ts";
 
-import { likeForLikePool, fuelPowertrainHint, todayLocal, olderYearsLadder, POOL_CAP } from "./market-count.js";
+import { likeForLikePool, fuelPowertrainHint, todayLocal, olderYearsLadder, POOL_CAP, dealersOfRows } from "./market-count.js";
 import { powertrainCompatible, baseNameplate } from "./model-identity.js";
 
 export interface MarketValue {
@@ -430,10 +430,6 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
       model: ctx.model, rowModel: got.model, trim: ctx.trim ?? null, year: ctx.year, condition: String(ctx.condition),
       odometerKm: mileage, minRows: COMP_FLOOR, today, powertrainHint: fuelPowertrainHint(ctx.fuelType),
     });
-    const dealersOf = (set: any[]): number | null => {
-      const named = set.filter((r) => r.dealerName || r.city);
-      return named.length ? new Set(named.map((r) => String(r.dealerName || r.city).trim().toLowerCase().replace(/\s+/g, " "))).size : null;
-    };
     const asOfOf = (set: any[]): string | null => set.reduce<string | null>((mx, r) => (r.asOf && (!mx || r.asOf > mx) ? r.asOf : mx), null);
     const seenMinOf = (set: any[]): string | null => set.reduce<string | null>((mn, r) => (r.asOf && (!mn || r.asOf < mn) ? r.asOf : mn), null);
     const yearsOf = (set: any[]): [number | null, number | null] => {
@@ -452,7 +448,7 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
       // can check whether the set earned the phrase. [[claims-must-stay-backed]]
       powertrainSeparated: pool.powertrainSeparated !== false,
       kmLow: pool.kmLow, kmHigh: pool.kmHigh, condition: pool.condition, need: COMP_FLOOR,
-      dealers: set.length ? dealersOf(set) : null, asOf: set.length ? asOfOf(set) : null,
+      dealers: set.length ? dealersOfRows(set) : null, asOf: set.length ? asOfOf(set) : null,
       seenMin: set.length ? seenMinOf(set) : null, seenMax: set.length ? asOfOf(set) : null,
       make: String(ctx.make), model: String(ctx.model), province: prov,
     });

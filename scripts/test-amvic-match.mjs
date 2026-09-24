@@ -6,6 +6,7 @@
 // business. Every "expect null" case below is a claim we must NOT make.
 
 import { readFileSync } from "node:fs";
+import { rooftopsByHost, licenseeName } from "./lib/amvic-hosts.mjs";
 import { matchLicensee, classifyStatus, nameScore, pageDomains, normHost, licenceProbes } from "../supabase/functions/_shared/amvic-match.js";
 
 // Real shapes from AMVIC's registry (values observed live 2026-08-10).
@@ -354,6 +355,38 @@ const check = (label, cond, detail) => {
   check("the probe is chosen by selectivity, not by length",
     fn.includes("licenceProbes(") && !fn.includes("b.length - a.length"),
     "the longest token of 'Lexus of Edmonton' is the city it sits in");
+}
+
+// ── one host, one rooftop ────────────────────────────────────────
+// 2026-09-24: discover-dealer-feeds kept the FIRST licensee listing a host, so
+// the Jim Pattison group's site was filed as "AUDI EDMONTON NORTH, Edmonton"
+// and 2,800 of the group's cars were credited to one Audi store. And AMVIC's
+// "N/A" trade-name placeholder was copied in as five dealers' names. Real rows.
+{
+  const L = (name, trade_name, city, website) => ({ name, trade_name, city, website, facility_status: "Issued" });
+  const hosts = rooftopsByHost([
+    L("JIM PATTISON AUTO EDMONTON LTD.", "AUDI EDMONTON NORTH", "Edmonton", "www.jpautogroup.com"),
+    L("JIM PATTISON INDUSTRIES LTD.", "CANYON CREEK TOYOTA (2018)", "Calgary", "www.jpautogroup.com"),
+    L("ADAMS CHEVROLET BUICK GMC LTD.", "N/A", "Wetaskiwin", "www.adamsgm.com"),
+    L("ADAMS CHEVROLET BUICK GMC LTD.", "N/A", "Ponoka", "www.adamsgm.com"),
+    L("WEST EDMONTON VOLKSWAGEN", "N/A", "Edmonton", "www.westedmontonvw.com"),
+    L("WEST EDMONTON VOLKSWAGEN", "N/A", "Edmonton", "https://www.westedmontonvw.com/"),
+    L("LAKEWOOD CHEVROLET LTD.", "N/A", "Edmonton", "WWW.LAKEWOODCHEV.COM"),
+  ]);
+  const jp = hosts.get("https://www.jpautogroup.com");
+  check("a host shared by two rooftops is NOT named after its first licensee",
+    jp && jp.rooftops === 2 && jp.name === null && jp.city === null, JSON.stringify(jp));
+  const adams = hosts.get("https://www.adamsgm.com");
+  check("one name in two cities is two rooftops (no single city to print)",
+    adams && adams.rooftops === 2 && adams.city === null, JSON.stringify(adams));
+  const wevw = [hosts.get("https://www.westedmontonvw.com")];
+  check("two licences, same name + city = one rooftop, still named",
+    wevw.every((h) => h?.licensees === 2 && h.rooftops === 1 && h.name === "WEST EDMONTON VOLKSWAGEN"), JSON.stringify(wevw));
+  check("AMVIC's 'N/A' trade name is never a dealer name -- the legal name is used",
+    hosts.get("https://www.lakewoodchev.com")?.name === "LAKEWOOD CHEVROLET LTD.");
+  check("licenseeName: n/a in any case, blank, or missing falls back to the legal name",
+    ["n/a", "NA", " ", null].every((t) => licenseeName({ name: "X LTD.", trade_name: t }) === "X LTD.")
+      && licenseeName({ name: "X LTD.", trade_name: "X MOTORS" }) === "X MOTORS");
 }
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);

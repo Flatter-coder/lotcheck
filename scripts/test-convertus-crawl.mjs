@@ -10,7 +10,7 @@
 // The VDP shape/values below are trimmed straight from a live page
 // (denhamford.ca, a 2024 Ford Bronco Sport, captured 2026-08-27).
 
-import { normalizeConvertus, vdpUrlsFromSitemap, discoverConvertusVdps, crawlConvertus, sameHost, sectionCondition, planSectionDelisting } from "./crawl-alberta-inventory.mjs";
+import { normalizeConvertus, vdpUrlsFromSitemap, discoverConvertusVdps, crawlConvertus, sameHost, sectionCondition, planSectionDelisting, rooftopGate } from "./crawl-alberta-inventory.mjs";
 import { parseRobots } from "./lib/robots.mjs";
 
 let pass = 0, fail = 0;
@@ -227,6 +227,40 @@ const opts = (map, boom) => ({ fetcher: mkFetcher(map, boom), delayMs: 0 });
   // double-count a VIN — an inflated saw-count would defeat the SQL >50% guard.
   const dup = planSectionDelisting({ used: { crawled: true, ok: true } }, { used: ["V1", "V2", "V1", "V2"], new: [] }, true);
   check("same-condition duplicate VINs are deduped in the saw-count", dup.length === 1 && dup[0].count === 2 && dup[0].vins.length === 2);
+}
+
+// ---- rooftopGate: a unit is credited only to the rooftop its own page names ----
+// Replays 2026-09-24: https://www.jpautogroup.com, filed as "AUDI EDMONTON
+// NORTH, Edmonton", served one sitemap for the whole Jim Pattison group, and
+// every unit in it was credited to the Audi store.
+{
+  const unit = (company) => normalizeConvertus({ ...VDP_VEHICLE, company_data: company }, "new");
+  const AUDI = { company_name: "Audi Edmonton North", company_city: "Edmonton", company_province: "AB" };
+  const CANYON = { company_name: "Canyon Creek Toyota", company_city: "Calgary", company_province: "AB" };
+  const BC_STORE = { company_name: "Jim Pattison Toyota Surrey", company_city: "Surrey", company_province: "BC" };
+  const audiRow = { name: "AUDI EDMONTON NORTH", city: "Edmonton", province: "AB" };
+
+  const a = unit(AUDI);
+  check("normalizeConvertus reads the unit's own rooftop from company_data",
+    a?.rooftop?.name === "Audi Edmonton North" && a.rooftop.city === "Edmonton" && a.rooftop.province === "AB");
+  check("no company_data -> rooftop null (never invented)", normalizeConvertus(VDP_VEHICLE, "used").rooftop === null);
+
+  const group = rooftopGate([a, unit(CANYON), unit(BC_STORE)], audiRow);
+  check("group feed (units name 3 rooftops) -> refused, NOTHING credited", group.rows.length === 0 && /3 rooftops/.test(group.refused || ""), ` got ${JSON.stringify(group)}`);
+
+  const own = rooftopGate([a, unit({ ...AUDI, company_city: "EDMONTON ", company_province: "Alberta" })], audiRow);
+  check("one rooftop matching the dealer row (case/space/'Alberta' tolerant) -> credited", own.refused === null && own.rows.length === 2);
+  check("credited rows carry no `rooftop` key into fn_upsert_listings", own.rows.every((r) => !("rooftop" in r)));
+
+  const elsewhere = rooftopGate([unit(CANYON)], audiRow);
+  check("the one rooftop named is in another city -> refused", elsewhere.rows.length === 0 && /Calgary/.test(elsewhere.refused || ""));
+
+  const otherProv = rooftopGate([unit({ ...BC_STORE, company_city: "Edmonton" })], audiRow);
+  check("the one rooftop named is in another province -> refused", otherProv.rows.length === 0 && /BC/.test(otherProv.refused || ""));
+
+  const silent = [{ vin: "1HGCV1F30PA000007", year: 2023 }, { vin: "1HGCV1F30PA000008", year: 2024 }];
+  const pass2 = rooftopGate(silent, audiRow);
+  check("units whose page names no rooftop (sm360/jsonld/edealer) pass unchanged", pass2.refused === null && pass2.rows.length === 2);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
