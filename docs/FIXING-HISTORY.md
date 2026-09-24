@@ -81,7 +81,7 @@ The clusters, read-only from the live database:
 
 ### Fix
 
-`bba6f53`:
+PR #541 (`81d6029` before squash):
 - `20260924b_count_a_car_once.sql` adds `fn_listing_once(p_day)`, the one
   definition of "a car on sale". Its rules:
   - group feeds are excluded;
