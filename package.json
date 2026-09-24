@@ -145,6 +145,7 @@
     "check:api-keys": "node scripts/check-api-keys.mjs",
     "check:key-health-endpoints": "node scripts/check-key-health-endpoints.mjs",
     "check:syntax": "node scripts/check-script-syntax.mjs",
+    "check:rewrites": "node scripts/check-rewrites-not-shadowed.mjs",
     "check:imports": "node scripts/check-imports-resolve.mjs",
     "test:price-index": "node scripts/test-price-index.mjs",
     "test:recall-sweep": "node scripts/test-recall-sweep.mjs",
