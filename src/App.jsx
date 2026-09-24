@@ -2452,94 +2452,41 @@ function LiveTicker({listings,isLive,onSelect}){
 // UPDATE. Create your own login at Supabase → Authentication → Users →
 // Add User with your real email + a real password.
 // ── Shared logo mark ────────────────────────────────────────────────────────
-// One consistent icon everywhere: a blue circle with a scan/search glyph,
-// replacing the old green-gradient checkmark used inconsistently across
-// admin.html, the React admin panel, the main site header, and the dealer
-// portal. Only replaces genuine brand-logo usages -- the plain checkmark
-// emoji used elsewhere as a decorative "success" indicator (trial badges,
-// empty states) is untouched, since that's a different meaning, not branding.
-function LogoMark({ size = 32 }) {
-  // Real animated gate+car mark, pulled directly from the live homepage --
-  // this replaces the old coral cube, which was never updated when the
-  // homepage logo changed. viewBox is 145x130 (not perfectly square);
-  // width/height are both set to `size` for a clean square footprint at
-  // every call site, matching what the coral cube it replaces did.
+// The 07b "Sticker + Scan" mark (2026-09-24): a window sticker -- the quote --
+// with the scan line passing across it and the stamp that says it was checked.
+// Same 64-unit geometry as public/brand/lotcheck-mark.svg, the app icons and
+// the PDF header, so every surface draws one mark. The outline and header take
+// `currentColor`, so the mark follows whatever text colour its row already
+// uses: navy on the light pages, white on the dark ones, with no per-page
+// variant to keep in sync. It carries its own keyframes (the scan line moves)
+// so it animates on pages that don't load GLOBAL_CSS.
+const BRAND_BLUE = "#2B72FF";
+function BrandMark({ size = 32, color }) {
   return (
-    <div style={{ position:"relative", width:size, height:size, overflow:"hidden", borderRadius:size*0.18, flexShrink:0 }}>
-      <svg width={size} height={size} viewBox="-95 -45 145 130" aria-hidden="true">
-        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
-        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
-        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
-        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
-        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
-        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
-        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
-        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
-        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
-        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
-        <g className="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
-        <g className="lc-gate-car">
-          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
-          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
-          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
-          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
-          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
-          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
-          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
-          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
-          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
-          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
-          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
-          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
-        </g>
-      </svg>
-    </div>
-  );
-}
-
-// Self-contained animated brand mark — the same gate+car as LogoMark, but it
-// carries its OWN keyframes so the car drives through the gate on any page,
-// including the cosmic pages (MSRP/Verify/Trust) that don't load GLOBAL_CSS.
-function SiteLogo({ size = 30 }) {
-  return (
-    <div style={{ position:"relative", width:size, height:size, flexShrink:0 }}>
+    <span style={{display:"inline-flex",width:size,height:size,flexShrink:0,color}}>
       <style dangerouslySetInnerHTML={{__html:`
-        .slc-car{animation:slcDrive 4s linear infinite}
-        .slc-win{animation:slcFlash 4s linear infinite}
-        @keyframes slcDrive{0%{transform:translate(-95px,-47px);opacity:0}10%{opacity:1}50%{transform:translate(0,0)}90%{opacity:1}100%{transform:translate(95px,47px);opacity:0}}
-        @keyframes slcFlash{0%,40%{opacity:.22}50%{opacity:.68}60%,100%{opacity:.22}}
-        @media(prefers-reduced-motion:reduce){.slc-car,.slc-win{animation:none!important}}
+        .lcm-beam{animation:lcmScan 3.6s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+        @keyframes lcmScan{0%,100%{transform:translateY(-6px)}50%{transform:translateY(6px)}}
+        @media(prefers-reduced-motion:reduce){.lcm-beam{animation:none!important}}
       `}}/>
-      <svg width={size} height={size} viewBox="-95 -45 145 130" aria-hidden="true">
-        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
-        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
-        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
-        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
-        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
-        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
-        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
-        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
-        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
-        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
-        <g className="slc-win"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(58,224,255,.5)"/></g>
-        <g className="slc-car">
-          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
-          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
-          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
-          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
-          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
-          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
-          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
-          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
-          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
-          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
-          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
-          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
-        </g>
+      <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
+        <rect x="10" y="6" width="40" height="52" rx="5" fill="none" stroke="currentColor" strokeWidth="4"/>
+        <path d="M10 11a5 5 0 0 1 5-5h30a5 5 0 0 1 5 5v7H10z" fill="currentColor"/>
+        <rect x="16" y="24" width="22" height="3.8" rx="1.9" fill="currentColor" opacity=".7"/>
+        <rect className="lcm-beam" x="3" y="31" width="58" height="5" rx="2.5" fill={BRAND_BLUE}/>
+        <circle cx="44" cy="47" r="12" fill={BRAND_BLUE}/>
+        <path d="M38.48 47.48l4.2 4.2 7.44-7.44" fill="none" stroke="#fff" strokeWidth="3.72" strokeLinecap="round" strokeLinejoin="round"/>
       </svg>
-    </div>
+    </span>
   );
 }
+// Two-tone wordmark: "Lot" in the row's own colour, "Check" in brand blue.
+function BrandWord({ blue = BRAND_BLUE }) {
+  return <span>Lot<span style={{color:blue}}>Check</span></span>;
+}
+// Kept as names so every existing call site picks up the new mark unchanged.
+const LogoMark = BrandMark;
+const SiteLogo = BrandMark;
 
 // ── Admin panel colors — LotCheck brand palette, independent of the shared
 // dark GLOBAL_CSS theme so this doesn't touch the buyer-facing site ────────
@@ -2635,7 +2582,7 @@ function AdminLogin(){
       <div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:C.paper,fontFamily:"'Nunito',Helvetica,Arial,sans-serif",position:"relative"}}>
         <div style={{position:"absolute",top:16,right:16}}><ThemeToggle/></div>
         <form onSubmit={handleLogin} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:20,padding:"40px 36px",width:360,maxWidth:"90vw",textAlign:"center",boxSizing:"border-box",boxShadow:"6px 7px 0 rgba(51,48,90,0.10)"}}>
-          <div style={{display:"flex",justifyContent:"center",marginBottom:16}}><LogoMark size={56}/></div>
+          <div style={{display:"flex",justifyContent:"center",marginBottom:16}}><LogoMark size={56} color={C.ink}/></div>
           <div style={{fontSize:22,fontWeight:800,color:C.ink,marginBottom:4}}>LotCheck<sup style={{fontSize:"0.45em",fontWeight:700,marginLeft:2}}>™</sup> Admin</div>
           <div style={{fontSize:14.5,color:C.inkFaint,marginBottom:24,lineHeight:1.5}}>Real Supabase login — leads data is protected at the database level, not just this screen.</div>
           <input type="email" placeholder="you@lotcheck.ca" value={email} onChange={e=>setEmail(e.target.value)} required
@@ -5795,7 +5742,7 @@ function FoundersPanel(){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
                      flexWrap:"wrap",gap:12,maxWidth:1100,margin:"0 auto 20px"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <LogoMark size={32}/>
+            <LogoMark size={32} color={C.ink}/>
             <div>
               <div style={{fontWeight:800,fontSize:18,color:C.ink}}>
                 LotCheck<sup style={{fontSize:"0.45em",fontWeight:700,marginLeft:2}}>™</sup> Founders
@@ -6134,7 +6081,7 @@ function AdminPanel(){
 
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,maxWidth:1100,margin:"0 auto 20px",flexWrap:"wrap",gap:12}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <LogoMark size={32}/>
+          <LogoMark size={32} color={C.ink}/>
           <div style={{fontWeight:800,fontSize:18,color:C.ink}}>LotCheck<sup style={{fontSize:"0.45em",fontWeight:700,marginLeft:2}}>™</sup> Admin</div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:4,background:C.card,border:`1px solid ${C.line}`,borderRadius:10,padding:4}}>
@@ -9379,7 +9326,7 @@ function VerifyPage(){
       <style dangerouslySetInnerHTML={{__html:css}}/>
       <nav style={{position:"sticky",top:0,zIndex:300,background:T.navBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:`1px solid ${T.navBorder}`}}>
         <div style={{maxWidth:1320,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:14}}>
-          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem",flexShrink:0}}><SiteLogo size={45}/>LotCheck</a>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem",flexShrink:0}}><SiteLogo size={45}/><BrandWord blue={T.cyan==="#3ae0ff"?"#4C9BFF":"#1D6BFF"}/></a>
           <div className="vnav-links" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
             {navPrimary(NAV).map(([label,href])=>{const active=label==="Verify report";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
             <NavMore items={navMoreItems(NAV)} c={T.link} h={T.cyan} bg={vdark?"#141326":"#ffffff"} bd={T.navBorder}/>
@@ -9396,8 +9343,13 @@ function VerifyPage(){
           <div style={{position:"relative",minHeight:340,padding:22,display:"flex",flexDirection:"column",justifyContent:"flex-end",borderRight:`1px solid ${T.cardBd}`,overflow:"hidden",background:vdark?"transparent":"linear-gradient(180deg,#141238,#0e0b1c)"}}>
             <div className="vgridK" style={{position:"absolute",left:"-25%",right:"-25%",bottom:0,height:"55%",backgroundImage:"linear-gradient(rgba(52,211,153,.16) 1px,transparent 1px),linear-gradient(90deg,rgba(139,131,222,.16) 1px,transparent 1px)",backgroundSize:"26px 26px",transform:"perspective(420px) rotateX(60deg)",transformOrigin:"bottom",WebkitMaskImage:"linear-gradient(to top,#000 5%,transparent 78%)",maskImage:"linear-gradient(to top,#000 5%,transparent 78%)",animation:"vGrid 3.4s linear infinite"}}/>
             <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-              <svg viewBox="-145 -44 320 182" aria-hidden="true" style={{width:"78%",maxWidth:300,filter:`drop-shadow(0 24px 44px ${seal.bd}44)`}}>
-                <polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><g className="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/></g><g className="lc-gate-car"><polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/><polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/><polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/><polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/><polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/><polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/><polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/><polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/><polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/><polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/><polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/><polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/><polygon points="1,56.5 8,60 4,62 -3,58.5" fill="rgb(98,93,130)"/><polygon points="-3,63.5 4,67 4,62 -3,58.5" fill="rgb(64,59,100)"/><polygon points="8,65 4,67 4,62 8,60" fill="rgb(55,50,85)"/><polygon points="30,55 25,57.5 25,54.5 30,52" fill="#FFF3C9"/></g>
+              <svg viewBox="0 0 64 64" aria-hidden="true" style={{width:"46%",maxWidth:190,filter:`drop-shadow(0 24px 44px ${seal.bd}44)`}}>
+                <rect x="10" y="6" width="40" height="52" rx="5" fill="#fff" stroke="#0B1B3F" strokeWidth="4"/>
+                <path d="M10 11a5 5 0 0 1 5-5h30a5 5 0 0 1 5 5v7H10z" fill="#0B1B3F"/>
+                <rect x="16" y="24" width="22" height="3.8" rx="1.9" fill="#0B1B3F" opacity=".7"/>
+                <rect className="lcm-beam" x="3" y="31" width="58" height="5" rx="2.5" fill="#1D6BFF"/>
+                <circle cx="44" cy="47" r="12" fill="#1D6BFF"/>
+                <path d="M38.48 47.48l4.2 4.2 7.44-7.44" fill="none" stroke="#fff" strokeWidth="3.72" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </div>
             <div key={P} style={{position:"absolute",right:14,bottom:44,zIndex:3,filter:`drop-shadow(0 0 16px ${seal.bd}66)`,animation:"vSeal 1s ease-out both"}}><Shield state={authentic?"ok":isBad?"bad":"idle"} size={56}/></div>
@@ -11073,8 +11025,8 @@ function QuoteCheckPage(){
         <nav aria-label="Main" style={{position:"sticky",top:0,zIndex:50,background:qcTheme==="dark"?"rgba(10,10,22,.72)":C.paper,backdropFilter:qcTheme==="dark"?"blur(12px)":"none",WebkitBackdropFilter:qcTheme==="dark"?"blur(12px)":"none",borderBottom:`1px solid ${C.line}`}}>
           <div style={{maxWidth:1180,margin:"0 auto",display:"flex",alignItems:"center",gap:14,padding:"11px 16px",flexWrap:"wrap"}}>
             <a href="/" aria-label="LotCheck home" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",flexShrink:0}}>
-              <LogoMark size={45}/>
-              <span style={{fontWeight:1000,fontSize:19,color:C.ink}}>LotCheck</span>
+              <LogoMark size={45} color={C.ink}/>
+              <span style={{fontWeight:1000,fontSize:19,color:C.ink}}><BrandWord blue={qcTheme==="dark"?"#4C9BFF":"#1D6BFF"}/></span>
             </a>
             <div style={{display:"flex",alignItems:"center",gap:2,flexWrap:"wrap",flex:"1 1 auto"}}>
               {[
@@ -12260,7 +12212,7 @@ function TrustPage(){
       <style dangerouslySetInnerHTML={{__html:css}}/>
       <nav style={{position:"sticky",top:0,zIndex:300,background:"rgba(14,11,28,.82)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:"1px solid rgba(255,255,255,.08)"}}>
         <div style={{maxWidth:1120,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:22}}>
-          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={45}/>LotCheck</a>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={45}/><BrandWord blue="#4C9BFF"/></a>
           <div className="tnav-links" style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
             {navPrimary(NAV).map(([label,href])=><a key={label} href={href} style={{fontSize:".9rem",fontWeight:600,color:"#b6b1d6",textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>)}
             <NavMore items={navMoreItems(NAV)} c="#b6b1d6" h="#ffffff" bg="#161327" bd="rgba(255,255,255,.12)"/>
@@ -12492,7 +12444,7 @@ function CrawlCoverage(){
       <div style={{position:"sticky",top:0,zIndex:20,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",background:T.navBg,borderBottom:`1px solid ${T.hair}`}}>
         <div style={{maxWidth:1320,margin:"0 auto",padding:"11px clamp(16px,3vw,26px)",display:"flex",alignItems:"center",gap:14}}>
           <button onClick={goBack} aria-label="Back" style={{background:T.panel2,border:`1px solid ${T.hairS}`,color:T.muted,borderRadius:9,padding:"7px 11px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:mono,flexShrink:0}}>‹</button>
-          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.text,fontWeight:800,fontSize:"1.05rem",flexShrink:0}}><SiteLogo size={42}/>LotCheck</a>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.text,fontWeight:800,fontSize:"1.05rem",flexShrink:0}}><SiteLogo size={42}/><BrandWord/></a>
           <div className="crawl-navlinks" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
             {navPrimary(SITE_NAV).map(([label,href])=>{const active=href==="/crawl";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.amber:T.muted,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
@@ -12945,7 +12897,7 @@ function LotCheckApp(){
         <LiveBackground/>
         <header className="lc-header">
           <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
-            <LogoMark size={48}/>
+            <LogoMark size={48} color="#EAF0FF"/>
             <div style={{minWidth:0}}>
               <div style={{fontWeight:800,fontSize:16,letterSpacing:"-0.5px",lineHeight:1}}>LotCheck</div>
               <div style={{fontSize:9,color:"#334155",fontStyle:"italic",whiteSpace:"nowrap"}}>Did you LotCheck it?</div>
