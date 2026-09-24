@@ -24,6 +24,7 @@ import { resolvePriceVerified } from "../supabase/functions/_shared/price-verifi
 import { Icon3D } from "./icons3d.jsx";
 import { beforeYouSign } from "../supabase/functions/_shared/before-you-sign.ts";
 import { SAMPLE_ANALYSIS } from "./lib/sample-report.js";
+import { mountRainGlass } from "./lib/rain-glass.js";
 import { referenceBasis } from "../supabase/functions/_shared/msrp-basis.js";
 // A lit dot is a claim — one decision function, testable, with no way to force
 // a lit result without a timestamp from a read that actually returned.
@@ -9797,7 +9798,257 @@ export function planVisionTiles(srcW,srcH){
   return {isTall,outW,outH,tiles};
 }
 
-function QuoteCheckPage(){
+// ── Welcome (the home page) ─────────────────────────────────────────────────
+// Vic, 2026-09-24: the home page is ONE screen -- the Quote Scanner hero -- and
+// "Analyze my quote" turns its right half over, in 3D, into the analyze panel.
+// Everything else that used to sit on the home page (MSRP index, Alberta map,
+// how-it-works, the lane) is gone from it; those pages still exist by URL.
+//
+// This is a LAYOUT, not a second product. QuoteCheckPage keeps every piece of
+// logic -- sign-in, credits, gift links, the analyze calls, the report -- and
+// hands this component the one intake form it renders everywhere
+// (renderIntake), so the form has a single author. The sample on the front of
+// the card is not written here either: the chips are beforeYouSign() run over
+// SAMPLE_ANALYSIS, the builder the real report calls. The last hero wrote its
+// own chips and claimed a fee-vs-market-average comparison the product never
+// makes; this one cannot drift from the product because it is the product.
+const WELCOME_CSS = `
+.wl{--bg:#F6F8FC;--surface:#FFFFFF;--ink:#0B1B3F;--soft:#44506B;--faint:#6B7690;--line:rgba(11,27,63,.12);
+  --blue:#1D6BFF;--blue-ink:#1552CC;--blue-soft:rgba(29,107,255,.10);--raise:#ad3119;--raise-bg:#FCEDEA;--note:#6f6b63;
+  --shadow:rgba(0,8,30,.28);--chip:rgba(255,255,255,.97);--chip-line:rgba(29,107,255,.22);--glow:rgba(29,107,255,.12);
+  position:relative;color:var(--ink);font-family:'Plus Jakarta Sans',system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
+.wl.wl-dark{--bg:#07122B;--surface:#0E1D40;--ink:#EAF0FF;--soft:#A8B4D0;--faint:#8592B0;--line:rgba(234,240,255,.14);
+  --blue:#4C9BFF;--blue-ink:#7DB6FF;--blue-soft:rgba(76,155,255,.14);--raise:#FF8A6B;--raise-bg:rgba(255,138,107,.12);--note:#A9A6B8;
+  --shadow:rgba(0,8,30,.85);--chip:rgba(14,29,64,.95);--chip-line:rgba(76,155,255,.38);--glow:rgba(29,107,255,.32)}
+.wl-rain{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;z-index:0;opacity:0;transition:opacity .8s ease}
+.wl-rain[data-rain="live"]{opacity:1}
+.wl-scrim{position:absolute;inset:0;pointer-events:none;z-index:0;background:linear-gradient(90deg,rgba(7,18,43,.82) 0%,rgba(7,18,43,.55) 42%,rgba(7,18,43,.12) 70%,rgba(7,18,43,0) 100%)}
+.wl-main{position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);align-items:center;gap:clamp(16px,3vw,48px);
+  padding:clamp(24px,5vh,56px) clamp(16px,4vw,48px);max-width:1440px;margin:0 auto;min-height:calc(100dvh - 140px)}
+.wl-glow{position:absolute;right:4%;top:8%;width:min(46vw,620px);aspect-ratio:1;border-radius:50%;background:radial-gradient(closest-side,var(--glow),transparent);pointer-events:none}
+.wl-copy{display:flex;flex-direction:column;gap:24px;max-width:560px;position:relative;z-index:2;min-width:0}
+.wl-eyebrow{font-size:12px;letter-spacing:.22em;text-transform:uppercase;font-weight:800;color:var(--blue)}
+.wl h1{margin:0;font-size:clamp(40px,5.2vw,64px);line-height:1.02;font-weight:800;letter-spacing:-.04em;color:var(--ink)}
+.wl h1 span{color:var(--blue)}
+.wl-sub{margin:0;font-size:18px;line-height:1.55;color:var(--soft);max-width:490px}
+.wl-ctas{display:flex;gap:12px;flex-wrap:wrap}
+.wl-primary{height:54px;padding:0 28px;border-radius:999px;border:0;background:#1D6BFF;color:#fff;font:700 16px 'Plus Jakarta Sans',system-ui,sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;box-shadow:0 14px 30px -14px rgba(29,107,255,.8)}
+.wl-primary:hover{filter:brightness(1.07)}
+.wl-secondary{height:54px;padding:0 24px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--ink);font:600 16px 'Plus Jakarta Sans',system-ui,sans-serif;cursor:pointer}
+.wl-meta{font-size:13px;color:var(--soft)}
+.wl :focus-visible{outline:3px solid var(--blue);outline-offset:3px}
+.wl-stage{position:relative;height:clamp(500px,70vh,640px);perspective:1600px;z-index:1}
+.wl-card{position:absolute;inset:0;transform-style:preserve-3d;transition:transform 1s cubic-bezier(.65,.02,.2,1)}
+.wl-flipped .wl-card{transform:rotateY(-180deg)}
+.wl-face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden}
+.wl-front *{backface-visibility:hidden;-webkit-backface-visibility:hidden}
+.wl-back{transform:rotateY(180deg);display:flex;align-items:center;justify-content:center}
+.wl-flipped .wl-front{pointer-events:none}
+.wl:not(.wl-flipped) .wl-back{pointer-events:none;visibility:hidden;transition:visibility 0s 1s}
+.wl-scene{position:absolute;inset:0;transform-style:preserve-3d}
+.wl-float{position:absolute;left:4%;top:6%;width:min(370px,62%);aspect-ratio:370/486;transform-style:preserve-3d;animation:wlFloat 8s ease-in-out infinite}
+@keyframes wlFloat{0%,100%{transform:rotateX(13deg) rotateY(-23deg) rotateZ(-2.5deg) translateY(0)}50%{transform:rotateX(9deg) rotateY(-16deg) rotateZ(-1.5deg) translateY(-12px)}}
+.wl-paper{position:absolute;inset:0;padding:7.5%;border-radius:6px;background:linear-gradient(180deg,#fff,#F6F4EE);box-shadow:0 60px 100px -30px var(--shadow),0 0 0 1px rgba(11,27,63,.06);color:#1a2340;font:12px 'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;overflow:hidden}
+.wl-paper .hd{display:flex;justify-content:space-between;font-weight:600;font-size:13px}
+.wl-paper .veh{margin:6px 0 10px;font-size:11px;color:#6b6557}
+.wl-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px dashed #DAD4C6}
+.wl-bar{display:inline-block;height:8px;border-radius:4px;background:#D9D3C5}
+.wl-fine{margin-top:12px;font-size:10px;line-height:1.5;color:#857d6c}
+.wl-sample{position:absolute;right:7%;bottom:5%;font-size:10px;font-weight:600;letter-spacing:.14em;color:#857d6c;border:1px solid #cfc8b8;border-radius:4px;padding:3px 6px}
+.wl-beam{position:absolute;left:-14px;right:-14px;top:8%;height:3px;border-radius:2px;background:#4C9BFF;box-shadow:0 0 14px #4C9BFF,0 0 44px #1D6BFF;animation:wlScan 4.2s ease-in-out infinite}
+.wl-beam::after{content:'';position:absolute;left:14px;right:14px;bottom:3px;height:84px;background:linear-gradient(to top,rgba(76,155,255,.22),rgba(76,155,255,0))}
+@keyframes wlScan{0%,100%{top:8%}50%{top:92%}}
+.wl-chip{position:absolute;left:95%;width:min(300px,80%);padding:13px 15px;border-radius:14px;background:var(--chip);border:1px solid var(--chip-line);box-shadow:0 24px 44px -18px rgba(0,8,30,.35);font-size:13px;color:var(--ink);opacity:0;animation:wlChip 8.4s cubic-bezier(.22,.75,.28,1) infinite both}
+@keyframes wlChip{0%{opacity:0;transform:translateZ(10px) translateX(-90px)}12%,72%{opacity:1;transform:translateZ(110px) translateX(0)}84%,100%{opacity:0;transform:translateZ(140px) translateX(36px)}}
+.wl-chip .t{display:flex;gap:9px;align-items:center;font-weight:700}
+.wl-chip .w{margin-left:auto;font-size:11px;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap}
+.wl-chip .d{margin-top:5px;color:var(--soft);font:11.5px/1.45 'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace}
+.wl .raise{color:var(--raise)} .wl .noted{color:var(--note)}
+.wl-flipped .wl-chip,.wl-flipped .wl-float{animation-play-state:paused}
+.wl-panel{width:min(520px,100%);max-height:100%;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:24px;padding:26px;box-shadow:0 40px 90px -40px var(--shadow);color:var(--ink)}
+.wl-panel-top{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.wl-back-btn{height:40px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--ink);font:600 13px 'Plus Jakarta Sans',system-ui,sans-serif;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.wl-back-btn:disabled{opacity:.45;cursor:default}
+.wl-free{margin-left:auto;font-size:12px;font-weight:700;color:var(--blue-ink);background:var(--blue-soft);padding:6px 10px;border-radius:999px;text-align:right}
+.wl-panel h2:focus{outline:none}
+.wl-panel h2{margin:0 0 6px;font-size:24px;letter-spacing:-.03em;color:var(--ink)}
+.wl-panel .lead{margin:0 0 16px;font-size:13.5px;line-height:1.5;color:var(--faint)}
+.wl-scanbox{position:relative;height:170px;border-radius:14px;background:linear-gradient(180deg,#fff,#F4F1EA);overflow:hidden;border:1px solid var(--line);margin:6px 0 16px}
+.wl-scanbox .ln{height:7px;border-radius:4px;background:#D9D3C5;margin:14px 18px 0}
+.wl-scanbox .wl-beam{animation-duration:1.6s}
+.wl-live{font-size:14px;color:var(--soft);display:flex;gap:10px;align-items:center}
+.wl-dot{width:9px;height:9px;border-radius:50%;background:var(--blue);animation:wlPulse 1.2s ease-in-out infinite;flex:none}
+@keyframes wlPulse{0%,100%{opacity:1}50%{opacity:.3}}
+.wl-res-line{font-size:22px;font-weight:800;letter-spacing:-.02em;margin:4px 0}
+.wl-total{font:600 30px 'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;color:var(--raise)}
+.wl-items{display:flex;flex-direction:column;gap:9px;margin-top:14px}
+.wl-item{padding:11px 13px;border-radius:12px;border-left:3px solid var(--line);background:var(--bg)}
+.wl-item.r{border-left-color:var(--raise);background:var(--raise-bg)}
+.wl-item b{font-size:13.5px}
+.wl-item div{font-size:12.5px;color:var(--soft);margin-top:3px;line-height:1.5}
+.wl-tag{font-size:10.5px;font-weight:800;letter-spacing:.08em;color:#181205;background:#F5C95C;padding:4px 8px;border-radius:6px;margin-left:auto}
+.wl-kicker{font:10.5px 'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;color:var(--faint);text-transform:uppercase}
+.wl-foot{position:relative;z-index:1;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:16px clamp(16px,4vw,48px);border-top:1px solid var(--line);font-size:12.5px;color:var(--faint);max-width:1440px;margin:0 auto}
+.wl-foot nav{display:flex;gap:18px}
+.wl-foot a{color:var(--soft);text-decoration:none}
+.wl-foot a:hover{color:var(--blue)}
+@media (max-width:900px){
+  .wl-main{grid-template-columns:minmax(0,1fr);min-height:0}
+  .wl-stage{height:600px}
+  .wl-float{left:0;top:2%;width:72%}
+  .wl-chip{left:14%;width:118%;padding:11px 13px}
+  .wl-panel{padding:20px}
+  .wl-scrim{background:linear-gradient(180deg,rgba(7,18,43,.8) 0%,rgba(7,18,43,.5) 55%,rgba(7,18,43,.2) 100%)}
+}
+@media (max-width:480px){
+  .wl h1{font-size:40px}
+  .wl-sub{font-size:16px}
+  .wl-primary,.wl-secondary{width:100%}
+}
+@media (prefers-reduced-motion:reduce){
+  .wl *,.wl *::before,.wl *::after{animation:none!important;transition:none!important}
+  .wl-chip{opacity:1;transform:translateZ(110px)}
+}
+`;
+
+const WL_ALERT = <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="none" stroke="currentColor" strokeWidth="1.6" opacity=".6"/><path d="M12 6.5v7" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"/><circle cx="12" cy="17.3" r="1.5" fill="currentColor"/></svg>;
+const WL_NOTE = <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="none" stroke="currentColor" strokeWidth="1.6" opacity=".6"/><path d="M7 12h10" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"/></svg>;
+const WL_ARROW = <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const WL_BACK = <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8H3M7 4L3 8l4 4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+
+// Rain on the window behind the dark welcome screen (src/lib/rain-glass.js):
+// raw WebGL, no library. It pauses when the tab is hidden or the hero scrolls
+// away, draws one still frame under reduced motion, lowers its own resolution
+// on slow GPUs, and stays invisible if WebGL is missing -- the navy ground
+// underneath is the fallback, never a blank hero. The street behind the glass
+// is drawn procedurally: the old hero photo had a mock "leverage score" baked
+// into it, and every drop would have shown it sharp.
+function RainLayer(){
+  const ref=useRef(null);
+  useEffect(()=>{
+    if(!ref.current) return;
+    let fx=null;
+    try{ fx=mountRainGlass(ref.current,{horizon:window.innerWidth>860?0.6:0.66}); }catch(_){}
+    return ()=>{ try{ fx&&fx.destroy(); }catch(_){} };
+  },[]);
+  return <canvas ref={ref} className="wl-rain" aria-hidden="true"/>;
+}
+
+function WelcomeHero({ dark, flipped, setFlipped, panel, setPanel, intake, busy, readingText, fileName, signedIn, rain }){
+  const sample = useMemo(()=>beforeYouSign(SAMPLE_ANALYSIS),[]);
+  // Three chips on the paper: the flagged-money line, the fee, the recalls.
+  // Days-on-lot stays inside the sample panel, where the report shows it too.
+  const chips = sample.items.filter(it=>!/on the lot/i.test(it.detail)).slice(0,3);
+  const docFee = SAMPLE_ANALYSIS.docFeeCheck?.docFee;
+  const v = SAMPLE_ANALYSIS;
+  const analyzeRef = useRef(null), titleRef = useRef(null);
+  useEffect(()=>{
+    if(!(flipped&&panel==="intake")) return;
+    const t=setTimeout(()=>titleRef.current?.focus({preventScroll:true}),700);
+    return ()=>clearTimeout(t);
+  },[flipped,panel]);
+  useEffect(()=>{
+    const k=(e)=>{ if(e.key==="Escape"&&flipped&&!busy){ setFlipped(false); analyzeRef.current?.focus(); } };
+    window.addEventListener("keydown",k);
+    return ()=>window.removeEventListener("keydown",k);
+  },[flipped,busy,setFlipped]);
+  const open=(p)=>{
+    setPanel(p); setFlipped(true);
+    if(window.innerWidth<=900) setTimeout(()=>document.getElementById("wl-stage")?.scrollIntoView({behavior:"smooth",block:"center"}),60);
+  };
+  return(
+    <section className={"wl"+(dark?" wl-dark":"")+(flipped?" wl-flipped":"")} aria-label="Check a dealer quote">
+      <style>{WELCOME_CSS}</style>
+      {dark&&rain}
+      {dark&&<div className="wl-scrim" aria-hidden="true"/>}
+      <div className="wl-main">
+        {!dark&&<div className="wl-glow" aria-hidden="true"/>}
+        <div className="wl-copy">
+          <div className="wl-eyebrow">Upload · Read · Check</div>
+          <h1>Every line on the quote, <span>read and checked.</span></h1>
+          <p className="wl-sub">PDF, photo or a crumpled printout. LotCheck reads each line item — price, fees, add-ons, the fine print — and checks it against the source that should agree with it.</p>
+          <div className="wl-ctas">
+            <button ref={analyzeRef} type="button" className="wl-primary" aria-controls="wl-stage" aria-expanded={flipped&&panel!=="sample"} onClick={()=>open("intake")}>Analyze my quote {WL_ARROW}</button>
+            <button type="button" className="wl-secondary" aria-controls="wl-stage" onClick={()=>open("sample")}>See a sample report</button>
+          </div>
+          <div className="wl-meta">Works with New · Demo · Certified · Used</div>
+        </div>
+
+        <div className="wl-stage" id="wl-stage">
+          <div className="wl-card">
+            {/* FRONT: the sample quote being read */}
+            <div className="wl-face wl-front" aria-hidden="true">
+              <div className="wl-scene">
+                <div className="wl-float">
+                  <div className="wl-paper">
+                    <div className="hd"><span>DEALER WORKSHEET</span><span>No. 04417</span></div>
+                    <div className="veh">{`${v.year} ${v.make} ${v.model} ${v.trim}`.toUpperCase()} · VIN <span className="wl-bar" style={{width:110}}/></div>
+                    <div className="wl-row"><span>Selling price</span><span className="wl-bar" style={{width:112}}/></div>
+                    <div className="wl-row"><span>Documentation fee</span>{docFee!=null?<b>${Number(docFee).toLocaleString("en-CA")}</b>:<span className="wl-bar" style={{width:60}}/>}</div>
+                    <div className="wl-row"><span>Protection package</span><span className="wl-bar" style={{width:70}}/></div>
+                    <div className="wl-row"><span>Freight &amp; PDI</span><span className="wl-bar" style={{width:74}}/></div>
+                    <div className="wl-row"><span>Admin fee</span><span className="wl-bar" style={{width:50}}/></div>
+                    <div className="wl-row"><span>GST 5%</span><span className="wl-bar" style={{width:62}}/></div>
+                    <div className="wl-row" style={{border:0,fontWeight:600}}><span>TOTAL</span><span className="wl-bar" style={{width:120,background:"#C9C2B2"}}/></div>
+                    <div className="wl-fine">Worksheet is not a bill of sale. Rate O.A.C.</div>
+                    <div className="wl-sample">SAMPLE</div>
+                    <div className="wl-beam"/>
+                  </div>
+                  {chips.map((it,i)=>(
+                    <div key={i} className="wl-chip" style={{top:`${7+i*24}%`,animationDelay:`${i*0.95}s`}}>
+                      <div className="t"><span className={it.tone==="raise"?"raise":"noted"} style={{display:"flex"}}>{it.tone==="raise"?WL_ALERT:WL_NOTE}</span><span>{it.label}</span><span className={"w "+(it.tone==="raise"?"raise":"noted")}>{it.tone==="raise"?"To raise":"Noted"}</span></div>
+                      <div className="d">{it.detail}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* BACK: the analyze panel */}
+            <div className="wl-face wl-back">
+              <div className="wl-panel" aria-live="polite">
+                <div className="wl-panel-top">
+                  <button type="button" className="wl-back-btn" disabled={busy} onClick={()=>{setFlipped(false);analyzeRef.current?.focus();}}>{WL_BACK}Back</button>
+                  {!signedIn&&panel!=="sample"&&<span className="wl-free">First check free · sign in, no card</span>}
+                  {panel==="sample"&&<span className="wl-tag">SAMPLE</span>}
+                </div>
+                {panel==="intake"&&(<>
+                  <h2 ref={titleRef} tabIndex={-1}>Analyze my quote</h2>
+                  <p className="lead">Paste the dealer's own listing, or upload a screenshot or PDF of your quote.</p>
+                  {intake}
+                </>)}
+                {panel==="reading"&&(<>
+                  <h2>Reading your quote</h2>
+                  <div className="wl-scanbox" aria-hidden="true">{[60,82,45,70,55,76].map((w,i)=><div key={i} className="ln" style={{width:`${w}%`}}/>)}<div className="wl-beam"/></div>
+                  <div className="wl-live"><span className="wl-dot" aria-hidden="true"/>{readingText||"Reading every line item"}</div>
+                  {fileName&&<div className="lead" style={{marginTop:10,marginBottom:0}}>{fileName}</div>}
+                </>)}
+                {panel==="sample"&&(<>
+                  <div className="wl-kicker">Before you sign · {`${v.year} ${v.make} ${v.model} ${v.trim}`}</div>
+                  <div className="wl-res-line">{sample.line}</div>
+                  {sample.total!=null&&<div className="wl-total">${Number(sample.total).toLocaleString("en-CA")}</div>}
+                  <div className="wl-items">
+                    {sample.items.map((it,i)=>(
+                      <div key={i} className={"wl-item"+(it.tone==="raise"?" r":"")}><b>{it.label}</b><div>{it.detail}</div></div>
+                    ))}
+                  </div>
+                  <p className="lead" style={{marginTop:14}}>An invented car with invented findings, laid out by the same code that builds a real report.</p>
+                  <button type="button" className="wl-primary" style={{width:"100%"}} onClick={()=>setPanel("intake")}>Check my own quote</button>
+                </>)}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <footer className="wl-foot">
+        <span>© LotCheck · Calgary, Alberta</span>
+        <nav aria-label="Legal"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="mailto:hello@lotcheck.ca">hello@lotcheck.ca</a></nav>
+      </footer>
+    </section>
+  );
+}
+
+function QuoteCheckPage({ welcome = false } = {}){
   // Alberta-only gate. Hooks must run unconditionally, so this sits at the top
   // and the early return happens after every other hook has been declared.
   const region=useRegionGate();
@@ -10193,6 +10444,22 @@ function QuoteCheckPage(){
     try{ localStorage.setItem("lc-theme",next); }catch{}
   }
   const C=qcTheme==="dark"?QC_DARK:QC_LIGHT;
+  // Welcome layout (the home page): the right half of the screen turns over
+  // between the sample quote and the analyze panel. /quote-check links land
+  // already turned, on the form, because that is what they were asked for.
+  const [wFlip,setWFlip]=useState(()=>welcome&&window.location.pathname.startsWith("/quote-check"));
+  const [wPanel,setWPanel]=useState("intake");
+  useEffect(()=>{
+    if(!welcome) return;
+    if(status==="analyzing"){ setWPanel("reading"); setWFlip(true); }
+    else if(status==="idle") setWPanel(p=>p==="reading"?"intake":p);
+  },[welcome,status]);
+  const wOn=welcome&&(status==="idle"||status==="analyzing");
+  // The one intake form, re-coloured for the navy welcome panel (same keys as C).
+  const WP=qcTheme==="dark"
+    ?{paper:"#07122B",line:"rgba(234,240,255,.14)",ink:"#EAF0FF",inkSoft:"#A8B4D0",inkFaint:"#8592B0",teal:"#1D6BFF",tealBg:"rgba(76,155,255,.14)",tealInk:"#7DB6FF",coralInk:"#FF8A6B",onAccent:"#fff"}
+    :{paper:"#F6F8FC",line:"rgba(11,27,63,.12)",ink:"#0B1B3F",inkSoft:"#44506B",inkFaint:"#6B7690",teal:"#1D6BFF",tealBg:"rgba(29,107,255,.10)",tealInk:"#1552CC",coralInk:"#ad3119",onAccent:"#fff"};
+  const WCS={background:"transparent",border:"none",borderRadius:0,padding:0,boxShadow:"none"};
 
   // 5-star reviews green, 3-star amber, 1-star red -- with 4 and 2 filled
   // in sensibly on the same gradient (existing teal/butter/coral palette,
@@ -11007,6 +11274,86 @@ function QuoteCheckPage(){
     );
   }
 
+  // The intake form, written once. The classic layout passes C; the welcome
+  // panel passes WP, the same keys in the navy palette.
+  // Nav controls (theme switch, credits chip, Sign in) in the welcome palette.
+  const NC=wOn?{...C,paper2:qcTheme==="dark"?"#0E1D40":"#FFFFFF",line:WP.line,ink:WP.ink,inkSoft:WP.inkSoft,inkFaint:WP.inkFaint,teal:"#1D6BFF",tealBg:WP.tealBg,tealInk:WP.tealInk}:C;
+  const renderIntake=(P,cs)=>(
+              <div className="qc-intake" style={{...cs,marginBottom:0}}>
+                <div style={{display:"flex",gap:4,background:P.paper,border:`1px solid ${P.line}`,borderRadius:999,padding:4,marginBottom:18}}>
+                  <button type="button" onClick={()=>setIntakeTab("url")}
+                    style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:7,background:intakeTab==="url"?P.tealBg:"transparent",border:"none",borderRadius:999,padding:"10px 8px",color:intakeTab==="url"?P.tealInk:P.inkFaint,fontWeight:800,fontSize:13.5,cursor:"pointer"}}>
+                    <Icon3D name="link" size={14}/> Paste a link
+                  </button>
+                  <button type="button" onClick={()=>setIntakeTab("file")}
+                    style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:7,background:intakeTab==="file"?P.tealBg:"transparent",border:"none",borderRadius:999,padding:"10px 8px",color:intakeTab==="file"?P.tealInk:P.inkFaint,fontWeight:800,fontSize:13.5,cursor:"pointer"}}>
+                    <Icon3D name="camera" size={14}/> Upload a file
+                  </button>
+                </div>
+
+                {intakeTab==="url"?(
+                  <div>
+                    <label style={{display:"block",fontSize:12.5,fontWeight:700,color:P.inkSoft,marginBottom:8}}>Dealer listing or quote URL</label>
+                    <input
+                      type="url"
+                      placeholder="https://dealer-site.com/inventory/..."
+                      value={urlInput}
+                      onChange={e=>setUrlInput(e.target.value)}
+                      onKeyDown={e=>{if(e.key==="Enter") handleUrlAnalyze();}}
+                      style={{width:"100%",background:P.paper,border:`1px solid ${P.line}`,borderRadius:12,padding:"12px 14px",color:P.ink,fontSize:13.5,fontFamily:"ui-monospace,Menlo,Consolas,monospace",outline:"none",boxSizing:"border-box"}}
+                    />
+                    <div style={{fontSize:12,color:P.inkFaint,marginTop:9,lineHeight:1.5}}><strong style={{color:P.inkSoft}}>Dealer websites only</strong> — not AutoTrader, Kijiji, CarGurus or Facebook Marketplace.</div>
+                    {/* Non-blocking -- a hint, not a gate. */}
+                    {urlInput.trim()&&urlCompletenessHint(urlInput)&&(
+                      <div style={{fontSize:12,color:P.coralInk,marginTop:8,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
+                        <Icon3D name="warning" size={14}/>
+                        <span>{urlCompletenessHint(urlInput)}</span>
+                      </div>
+                    )}
+                    {/* The reactive full explanation -- fires only on an
+                        actual marketplace match, alongside the quiet
+                        standing note above. */}
+                    {urlInput.trim()&&isAggregatorUrl(urlInput)&&(
+                      <div style={{fontSize:12,color:P.coralInk,marginTop:8,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
+                        <Icon3D name="blocked" size={15}/>
+                        <span><strong>That's a listing marketplace</strong> — AutoTrader, CarGurus, Kijiji, eBay and Facebook Marketplace can't be checked by link. Paste the dealer's own page for the same vehicle, or upload a screenshot instead.</span>
+                      </div>
+                    )}
+                    <button type="button" onClick={handleUrlAnalyze}
+                      style={{width:"100%",marginTop:16,background:P.teal,border:"none",borderRadius:999,padding:"14px 18px",color:P.onAccent||"#03222b",fontWeight:900,fontSize:15,cursor:"pointer"}}>
+                      Analyze my quote
+                    </button>
+                  </div>
+                ):(
+                  <div>
+                    <label style={{display:"block",fontSize:12.5,fontWeight:700,color:P.inkSoft,marginBottom:8}}>Screenshot or PDF of your quote</label>
+                    <div
+                      onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+                      onDragLeave={()=>setDragOver(false)}
+                      onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
+                      onClick={()=>fileInputRef.current?.click()}
+                      onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fileInputRef.current?.click();}}}
+                      role="button" tabIndex={0}
+                      aria-label="Drop a quote screenshot or PDF, or click to choose a file"
+                      style={{border:`1.5px dashed ${dragOver?P.teal:P.line}`,borderRadius:16,background:P.paper,padding:"26px 16px",textAlign:"center",cursor:"pointer",transition:"border-color .15s,background .15s"}}
+                    >
+                      <span style={{width:42,height:42,borderRadius:12,background:P.tealBg,border:`1px solid ${P.teal}66`,display:"flex",alignItems:"center",justifyContent:"center",color:P.tealInk,margin:"0 auto 12px"}}><Icon3D name="camera" size={20}/></span>
+                      <div style={{fontSize:14.5,fontWeight:800,color:P.ink,marginBottom:4}}>Drop your quote here</div>
+                      <div style={{fontSize:12.5,color:P.inkFaint}}>or click to browse · PDF, JPG, PNG, WEBP or HEIC · up to {MAX_FILE_SIZE_MB}MB</div>
+                      <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" style={{display:"none"}}
+                        onClick={e=>e.stopPropagation()}
+                        onChange={e=>handleFile(e.target.files[0])}/>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{display:"flex",alignItems:"center",gap:8,marginTop:16,paddingTop:16,borderTop:`1px solid ${P.line}`,fontSize:11.5,color:P.inkFaint}}>
+                  <Icon3D name="lock" size={13}/>
+                  Nothing is charged until a full report is delivered.
+                </div>
+              </div>
+  );
+
   return(
     <>
       <style>{GLOBAL_CSS}</style>
@@ -11018,16 +11365,17 @@ function QuoteCheckPage(){
           page ground, and only looked fine while tall content covered the dark
           <body>. The short error view exposed it: dark page, cream nav, and a
           dark-ink title on a near-black ground (2026-09-01). */}
-      <div style={{minHeight:"100dvh",background:qcTheme==="dark"?"radial-gradient(125% 120% at 78% 4%,#141238 0%,#080a1c 46%,#05060f 100%) no-repeat":C.paper,backgroundColor:qcTheme==="dark"?"#05060f":C.paper,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
+      <div style={{minHeight:"100dvh",background:wOn?(qcTheme==="dark"?"#07122B":"#F6F8FC"):(qcTheme==="dark"?"radial-gradient(125% 120% at 78% 4%,#141238 0%,#080a1c 46%,#05060f 100%) no-repeat":C.paper),backgroundColor:wOn?(qcTheme==="dark"?"#07122B":"#F6F8FC"):(qcTheme==="dark"?"#05060f":C.paper),fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
         {/* Full-width site nav -- the same tabs as the rest of LotCheck, so the
             Quote Check page reads as part of the site, not a detached tool. The
             theme toggle, credits chip and Sign in live on its right side. */}
-        <nav aria-label="Main" style={{position:"sticky",top:0,zIndex:50,background:qcTheme==="dark"?"rgba(10,10,22,.72)":C.paper,backdropFilter:qcTheme==="dark"?"blur(12px)":"none",WebkitBackdropFilter:qcTheme==="dark"?"blur(12px)":"none",borderBottom:`1px solid ${C.line}`}}>
-          <div style={{maxWidth:1180,margin:"0 auto",display:"flex",alignItems:"center",gap:14,padding:"11px 16px",flexWrap:"wrap"}}>
+        <nav aria-label="Main" style={{position:"sticky",top:0,zIndex:50,background:wOn?(qcTheme==="dark"?"rgba(7,18,43,.72)":"rgba(246,248,252,.92)"):(qcTheme==="dark"?"rgba(10,10,22,.72)":C.paper),backdropFilter:qcTheme==="dark"?"blur(12px)":"none",WebkitBackdropFilter:qcTheme==="dark"?"blur(12px)":"none",borderBottom:`1px solid ${C.line}`}}>
+          <div style={{maxWidth:welcome?1440:1180,margin:"0 auto",display:"flex",alignItems:"center",gap:14,padding:welcome?"11px clamp(16px,4vw,48px)":"11px 16px",flexWrap:"wrap"}}>
             <a href="/" aria-label="LotCheck home" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",flexShrink:0}}>
               <LogoMark size={45} color={C.ink}/>
               <span style={{fontWeight:1000,fontSize:19,color:C.ink}}><BrandWord blue={qcTheme==="dark"?"#4C9BFF":"#1D6BFF"}/></span>
             </a>
+            {welcome?<div style={{flex:"1 1 auto"}}/>:(<>
             <div style={{display:"flex",alignItems:"center",gap:2,flexWrap:"wrap",flex:"1 1 auto"}}>
               {[
                 ["/live-price-index","MSRP Price Index"],
@@ -11049,15 +11397,16 @@ function QuoteCheckPage(){
               ))}
             </div>
             <NavMore items={[["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"]]} c={C.inkSoft} h={C.ink} bg={C.card} bd={C.line}/>
+            </>)}
             <div className="qc-topbar-controls" style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,flexWrap:"wrap"}}>
             {lastAttemptType&&(
               <button onClick={handleRefresh} disabled={status==="analyzing"} aria-label="Re-run this report"
                 title="Re-run this report from scratch"
-                style={{display:"flex",alignItems:"center",justifyContent:"center",width:34,height:34,borderRadius:10,background:C.paper2,border:`1px solid ${C.line}`,color:C.inkSoft,cursor:status==="analyzing"?"default":"pointer",opacity:status==="analyzing"?0.5:1,flexShrink:0,fontSize:15}}>
+                style={{display:"flex",alignItems:"center",justifyContent:"center",width:34,height:34,borderRadius:10,background:NC.paper2,border:`1px solid ${NC.line}`,color:NC.inkSoft,cursor:status==="analyzing"?"default":"pointer",opacity:status==="analyzing"?0.5:1,flexShrink:0,fontSize:15}}>
                 <Icon3D name="refresh" size={15}/>
               </button>
             )}
-            <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3,flexShrink:0}}>
+            <div style={{display:"flex",gap:3,background:NC.paper2,border:`1px solid ${NC.line}`,borderRadius:10,padding:3,flexShrink:0}}>
               {[
                 ["dark","Dark",(
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -11072,7 +11421,7 @@ function QuoteCheckPage(){
                 )],
               ].map(([k,label,icon])=>(
                 <button key={k} onClick={()=>setQcThemeAndPersist(k)} aria-label={`Switch to ${k} mode`}
-                  style={{display:"inline-flex",alignItems:"center",gap:5,background:qcTheme===k?C.tealBg:"transparent",color:qcTheme===k?C.tealInk:C.inkSoft,border:"none",borderRadius:7,padding:"6px 10px",fontSize:11.5,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  style={{display:"inline-flex",alignItems:"center",gap:5,background:qcTheme===k?NC.tealBg:"transparent",color:qcTheme===k?NC.tealInk:NC.inkSoft,border:"none",borderRadius:7,padding:"6px 10px",fontSize:11.5,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
                   {icon}
                   {label}
                 </button>
@@ -11089,19 +11438,19 @@ function QuoteCheckPage(){
                 return(
                   <span title={`${balance.personal} personal quote${balance.personal===1?"":"s"} left${balance.shareable?` · ${balance.shareable} to share`:""}`}
                     style={{fontSize:12,fontWeight:800,whiteSpace:"nowrap",flexShrink:0,borderRadius:999,padding:"6px 12px",
-                      color:low?C.butterInk:C.inkSoft,background:low?C.butterBg:C.paper2,border:`1px solid ${low?C.butter+"55":C.line}`}}>
+                      color:low?NC.butterInk:NC.inkSoft,background:low?NC.butterBg:NC.paper2,border:`1px solid ${low?NC.butter+"55":NC.line}`}}>
                     {balance.personal} quote{balance.personal===1?"":"s"} left
                   </span>
                 );
               }
               if(!freeUsed) return(
-                <span style={{fontSize:12,fontWeight:800,whiteSpace:"nowrap",flexShrink:0,borderRadius:999,padding:"6px 12px",color:C.tealInk,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
+                <span style={{fontSize:12,fontWeight:800,whiteSpace:"nowrap",flexShrink:0,borderRadius:999,padding:"6px 12px",color:NC.tealInk,background:NC.tealBg,border:`1px solid ${NC.teal}55`}}>
                   1 free check
                 </span>
               );
               return(
                 <button onClick={()=>setShowSignIn(true)}
-                  style={{fontSize:12,fontWeight:700,whiteSpace:"nowrap",flexShrink:0,borderRadius:999,padding:"6px 12px",color:C.inkFaint,background:"transparent",border:`1px solid ${C.line}`,cursor:"pointer"}}>
+                  style={{fontSize:12,fontWeight:700,whiteSpace:"nowrap",flexShrink:0,borderRadius:999,padding:"6px 12px",color:NC.inkFaint,background:"transparent",border:`1px solid ${NC.line}`,cursor:"pointer"}}>
                   Sign in for more
                 </button>
               );
@@ -11112,17 +11461,17 @@ function QuoteCheckPage(){
                 no gating anywhere, this is purely account presence. */}
             {user?(
               <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                <span title={user.email} style={{maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:12,fontWeight:800,color:C.ink,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:999,padding:"6px 12px"}}>
+                <span title={user.email} style={{maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:12,fontWeight:800,color:NC.ink,background:NC.paper2,border:`1px solid ${NC.line}`,borderRadius:999,padding:"6px 12px"}}>
                   {user.email}
                 </span>
                 <button onClick={()=>supabase.auth.signOut()} aria-label="Sign out"
-                  style={{background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:"6px 12px",color:C.inkSoft,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  style={{background:NC.paper2,border:`1px solid ${NC.line}`,borderRadius:10,padding:"6px 12px",color:NC.inkSoft,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
                   Sign out
                 </button>
               </div>
             ):(
               <button onClick={()=>setShowSignIn(true)}
-                style={{background:C.teal,border:"none",borderRadius:10,padding:"8px 16px",color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
+                style={{background:NC.teal,border:"none",borderRadius:10,padding:"8px 16px",color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
                 Sign in
               </button>
             )}
@@ -11133,8 +11482,8 @@ function QuoteCheckPage(){
             document); everything after idle -- error, analyzing, the report
             itself -- is a document, which reads badly past ~640px. So the
             measure follows status, not the page. */}
-        <div style={{maxWidth:status==="idle"?820:640,margin:"0 auto",padding:"24px 16px"}}>
-          <div style={{marginBottom:24}}>
+        <div style={{maxWidth:wOn?"none":(status==="idle"?820:640),margin:"0 auto",padding:wOn?0:"24px 16px"}}>
+          <div style={{marginBottom:wOn?0:24}}>
             {/* The wizard's own step-1 question ("How do you want to check
                 this?") carries the page's purpose once status is idle, so the
                 generic title only needs to show outside idle (analyzing, done,
@@ -11178,7 +11527,10 @@ function QuoteCheckPage(){
             </div>
           )}
 
-          {status==="idle"&&(()=>{
+          {wOn&&<WelcomeHero dark={qcTheme==="dark"} flipped={wFlip} setFlipped={setWFlip} panel={wPanel} setPanel={setWPanel}
+            intake={renderIntake(WP,WCS)} busy={status==="analyzing"} readingText={scanMsg} fileName={fileName} signedIn={!!user}
+            rain={qcTheme==="dark"?<RainLayer/>:null}/>}
+          {status==="idle"&&!welcome&&(()=>{
             // Concept #23 (dashboard gauge cluster) of the "Analyze my quote"
             // 25-concept round, 2026-09-09 -- Vic: "replace it with 23".
             // Replaces the earlier dropzone-primary + collapsible-link
@@ -11203,80 +11555,8 @@ function QuoteCheckPage(){
             <style>{`@media (max-width: 860px){ .qc-hero-grid{grid-template-columns:1fr!important;} .qc-cluster{order:2;} .qc-intake{order:1;} }`}</style>
             <div className="qc-hero-grid" style={{display:"grid",gridTemplateColumns:"minmax(300px,440px) 1fr",gap:20,alignItems:"start",marginBottom:36}}>
 
-              {/* INTAKE CARD */}
-              <div className="qc-intake" style={{...cardStyle,marginBottom:0}}>
-                <div style={{display:"flex",gap:4,background:C.paper,border:`1px solid ${C.line}`,borderRadius:999,padding:4,marginBottom:18}}>
-                  <button type="button" onClick={()=>setIntakeTab("url")}
-                    style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:7,background:intakeTab==="url"?C.tealBg:"transparent",border:"none",borderRadius:999,padding:"10px 8px",color:intakeTab==="url"?C.tealInk:C.inkFaint,fontWeight:800,fontSize:13.5,cursor:"pointer"}}>
-                    <Icon3D name="link" size={14}/> Paste a link
-                  </button>
-                  <button type="button" onClick={()=>setIntakeTab("file")}
-                    style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:7,background:intakeTab==="file"?C.tealBg:"transparent",border:"none",borderRadius:999,padding:"10px 8px",color:intakeTab==="file"?C.tealInk:C.inkFaint,fontWeight:800,fontSize:13.5,cursor:"pointer"}}>
-                    <Icon3D name="camera" size={14}/> Upload a file
-                  </button>
-                </div>
-
-                {intakeTab==="url"?(
-                  <div>
-                    <label style={{display:"block",fontSize:12.5,fontWeight:700,color:C.inkSoft,marginBottom:8}}>Dealer listing or quote URL</label>
-                    <input
-                      type="url"
-                      placeholder="https://dealer-site.com/inventory/..."
-                      value={urlInput}
-                      onChange={e=>setUrlInput(e.target.value)}
-                      onKeyDown={e=>{if(e.key==="Enter") handleUrlAnalyze();}}
-                      style={{width:"100%",background:C.paper,border:`1px solid ${C.line}`,borderRadius:12,padding:"12px 14px",color:C.ink,fontSize:13.5,fontFamily:"ui-monospace,Menlo,Consolas,monospace",outline:"none",boxSizing:"border-box"}}
-                    />
-                    <div style={{fontSize:12,color:C.inkFaint,marginTop:9,lineHeight:1.5}}><strong style={{color:C.inkSoft}}>Dealer websites only</strong> — not AutoTrader, Kijiji, CarGurus or Facebook Marketplace.</div>
-                    {/* Non-blocking -- a hint, not a gate. */}
-                    {urlInput.trim()&&urlCompletenessHint(urlInput)&&(
-                      <div style={{fontSize:12,color:C.coralInk,marginTop:8,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
-                        <Icon3D name="warning" size={14}/>
-                        <span>{urlCompletenessHint(urlInput)}</span>
-                      </div>
-                    )}
-                    {/* The reactive full explanation -- fires only on an
-                        actual marketplace match, alongside the quiet
-                        standing note above. */}
-                    {urlInput.trim()&&isAggregatorUrl(urlInput)&&(
-                      <div style={{fontSize:12,color:C.coralInk,marginTop:8,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
-                        <Icon3D name="blocked" size={15}/>
-                        <span><strong>That's a listing marketplace</strong> — AutoTrader, CarGurus, Kijiji, eBay and Facebook Marketplace can't be checked by link. Paste the dealer's own page for the same vehicle, or upload a screenshot instead.</span>
-                      </div>
-                    )}
-                    <button type="button" onClick={handleUrlAnalyze}
-                      style={{width:"100%",marginTop:16,background:C.teal,border:"none",borderRadius:999,padding:"14px 18px",color:"#03222b",fontWeight:900,fontSize:15,cursor:"pointer"}}>
-                      Analyze my quote
-                    </button>
-                  </div>
-                ):(
-                  <div>
-                    <label style={{display:"block",fontSize:12.5,fontWeight:700,color:C.inkSoft,marginBottom:8}}>Screenshot or PDF of your quote</label>
-                    <div
-                      onDragOver={e=>{e.preventDefault();setDragOver(true);}}
-                      onDragLeave={()=>setDragOver(false)}
-                      onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
-                      onClick={()=>fileInputRef.current?.click()}
-                      onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fileInputRef.current?.click();}}}
-                      role="button" tabIndex={0}
-                      aria-label="Drop a quote screenshot or PDF, or click to choose a file"
-                      style={{border:`1.5px dashed ${dragOver?C.teal:C.line}`,borderRadius:16,background:C.paper,padding:"26px 16px",textAlign:"center",cursor:"pointer",transition:"border-color .15s,background .15s"}}
-                    >
-                      <span style={{width:42,height:42,borderRadius:12,background:C.tealBg,border:`1px solid ${C.teal}66`,display:"flex",alignItems:"center",justifyContent:"center",color:C.tealInk,margin:"0 auto 12px"}}><Icon3D name="camera" size={20}/></span>
-                      <div style={{fontSize:14.5,fontWeight:800,color:C.ink,marginBottom:4}}>Drop your quote here</div>
-                      <div style={{fontSize:12.5,color:C.inkFaint}}>or click to browse · PDF, JPG, PNG, WEBP or HEIC · up to {MAX_FILE_SIZE_MB}MB</div>
-                      <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" style={{display:"none"}}
-                        onClick={e=>e.stopPropagation()}
-                        onChange={e=>handleFile(e.target.files[0])}/>
-                    </div>
-                  </div>
-                )}
-
-                <div style={{display:"flex",alignItems:"center",gap:8,marginTop:16,paddingTop:16,borderTop:`1px solid ${C.line}`,fontSize:11.5,color:C.inkFaint}}>
-                  <Icon3D name="lock" size={13}/>
-                  Nothing is charged until a full report is delivered.
-                </div>
-              </div>
+              {/* INTAKE CARD -- renderIntake(), shared with the welcome panel */}
+              {renderIntake(C,cardStyle)}
 
               {/* THE SAMPLE IS GENERATED, NOT WRITTEN.
                   This card used to be three hand-written dials: LEVERAGE 8.2 of
@@ -11359,7 +11639,7 @@ function QuoteCheckPage(){
             );
           })()}
 
-          {status==="analyzing"&&(
+          {status==="analyzing"&&!welcome&&(
             <ScanTakeover C={C} cardStyle={cardStyle} phase="running"
               attemptType={lastAttemptType} fileName={fileName}
               stageText={scanMsg||"Checking MSRP, add-ons, and warranty terms"}/>
@@ -12186,9 +12466,9 @@ function QuoteCheckPage(){
             );
           }}/></ReportBoundary>}
 
-          <div style={{textAlign:"center",marginTop:20,fontSize:11,color:C.inkFaint}}>
+          {!wOn&&<div style={{textAlign:"center",marginTop:20,fontSize:11,color:C.inkFaint}}>
             LotCheck never saves your quote to our own systems. It's analyzed once, then discarded on our end — nothing is stored.
-          </div>
+          </div>}
         </div>
       </div>
       {showSignIn&&<SignInModal C={C} cardStyle={cardStyle} notice={signInNotice} onClose={()=>{setShowSignIn(false);setSignInNotice(null);}}/>}
@@ -12815,7 +13095,8 @@ export default function App(){
         : path.startsWith("/admin") ? <AdminPanel/>
         : path.startsWith("/verify") ? <VerifyPage/>
         : path.startsWith("/real") ? <TrustPage/>
-        : path.startsWith("/quote-check") ? <QuoteCheckPage/>
+        : path.startsWith("/quote-check") ? <QuoteCheckPage welcome/>
+        : path === "/" ? <QuoteCheckPage welcome/>
         : path.startsWith("/crawl") ? <CrawlCoverage/>
         : path.startsWith("/value") ? <ValueReportPage/>
         : <LotCheckApp/>}

@@ -4,7 +4,7 @@
     { "source": "/alert-confirm", "destination": "/", "permanent": true }
   ],
   "rewrites": [
-    { "source": "/", "destination": "/index.html" },
+    { "source": "/", "destination": "/app.html" },
     { "source": "/live-price-index", "destination": "/live-price-index.html" },
     { "source": "/inventory-daily", "destination": "/alberta-inventory-daily.html" },
     { "source": "/alberta", "destination": "/alberta.html" },
