@@ -65,6 +65,16 @@ check("min_updated_at is the oldest observation", stats.min_updated_at === "2026
 check("empty city produces no fabricated stats", computeCityStats([]).n_listings === 0 && computeCityStats([]).index_pct === null,
   `got ${JSON.stringify(computeCityStats([]))}`);
 
+// fn_listing_once: a car two dealers list is ONE row with dealer_id null and
+// both dealers in dealer_ids. It counts once, both dealers count, and the null
+// is never counted as a dealer of its own.
+const shared = computeCityStats([
+  { dealer_id: 1, dealer_ids: [1], deviationPct: 5, deviationDollars: 2000, updated_at: "2026-08-15T00:00:00Z" },
+  { dealer_id: null, dealer_ids: [2, 3], deviationPct: 3, deviationDollars: 1200, updated_at: "2026-08-16T00:00:00Z" },
+]);
+check("a shared car is one listing and credits both its dealers", shared.n_listings === 2 && shared.n_dealers === 3,
+  `got n_listings=${shared.n_listings} n_dealers=${shared.n_dealers}`);
+
 check("percentile([], p) is null, never a guess", percentile([], 0.5) === null, "percentile did not return null for empty input");
 
 // ---- gatePublishable — the accuracy/defamation-avoidance gate -------------

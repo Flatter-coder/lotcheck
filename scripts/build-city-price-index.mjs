@@ -106,11 +106,15 @@ export function matchListingToMsrp(listing, catalogRows) {
   return { msrp: match.msrp, deviationDollars, deviationPct };
 }
 
-// matchedRows: [{ dealer_id, deviationPct, deviationDollars, updated_at }]
-// One city's worth, already filtered to confident matches.
+// A row's dealers: every dealer listing the car (dealer_ids, from
+// fn_listing_once) -- dealer_id is null when there is more than one.
+const dealersOf = (rows) => new Set(rows.flatMap((r) => r.dealer_ids ?? [r.dealer_id])).size;
+
+// matchedRows: [{ dealer_id, dealer_ids?, deviationPct, deviationDollars, updated_at }]
+// One city's worth, already filtered to confident matches. One row per car.
 export function computeCityStats(matchedRows) {
   const n_listings = matchedRows.length;
-  const n_dealers = new Set(matchedRows.map((r) => r.dealer_id)).size;
+  const n_dealers = dealersOf(matchedRows);
   const pcts = matchedRows.map((r) => r.deviationPct).sort((a, b) => a - b);
   const dollars = matchedRows.map((r) => r.deviationDollars);
   const updates = matchedRows.map((r) => new Date(r.updated_at).getTime()).filter(Number.isFinite);
@@ -262,7 +266,7 @@ export function computeProvinceRead(provRows, { minListings = PROVINCE_MIN_LISTI
     n_directional: directional.length,
     // paired with n_directional on the page ("N listings from D dealers"), so
     // it counts dealers behind the DIRECTIONAL calls, not every match
-    n_dealers: new Set(directional.map((r) => r.dealer_id)).size,
+    n_dealers: dealersOf(directional),
     under_n: byDir("under"),
     at_n: byDir("at"),
     over_n: byDir("over"),
@@ -313,16 +317,35 @@ async function main() {
   if (!url || !key) { console.error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required"); process.exit(1); }
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
 
-  console.log("Reading dealer_source, vehicle_listing, msrp_catalog...");
-  const [dealers, listings, catalog] = await Promise.all([
-    fetchAll(url, headers, "dealer_source", "select=id,city,province,active&active=eq.true"),
-    fetchAll(url, headers, "vehicle_listing", "select=dealer_id,year,make,model,trim,list_price,sale_price,msrp,updated_at,condition,delisted_on&condition=eq.new&delisted_on=is.null"),
+  // One row per live CAR, group feeds excluded: fn_listing_once
+  // (20260924b_count_a_car_once.sql). A car on two dealers' sites is one car;
+  // dealer_id is null for it and dealer_ids names both. Ordered by vin so the
+  // Range pages are stable.
+  console.log("Reading dealer_source, fn_listing_once, msrp_catalog...");
+  const [dealers, allCars, catalog] = await Promise.all([
+    fetchAll(url, headers, "dealer_source", "select=id,city,province,active&active=eq.true&group_feed=is.false"),
+    fetchAll(url, headers, "rpc/fn_listing_once", "select=dealer_id,dealer_ids,year,make,model,trim:trim_name,list_price,sale_price,msrp,updated_at,condition&condition=eq.new&order=vin"),
     fetchAll(url, headers, "msrp_catalog", "select=year,make,model,trim,msrp,fuel_type,drivetrain,attrs,price_basis,all_in_price"),
   ]);
-  console.log(`  ${dealers.length} active dealers, ${listings.length} live new-inventory listings, ${catalog.length} msrp_catalog rows.`);
-
   const dealerCity = new Map(dealers.map((d) => [d.id, d.city]));
   const dealerProvince = new Map(dealers.map((d) => [d.id, d.province]));
+  // Unchanged scope: only cars an ACTIVE dealer lists. A car with one dealer
+  // is placed where that dealer is; a shared car only where ALL its active
+  // dealers agree (city by cityKey, so spelling variants still agree).
+  const listings = [];
+  for (const c of allCars) {
+    const ids = (c.dealer_ids || []).filter((id) => dealerCity.has(id));
+    if (!ids.length) continue;
+    const provinces = new Set(ids.map((id) => dealerProvince.get(id)));
+    const cities = new Set(ids.map((id) => cityKey(dealerCity.get(id))));
+    listings.push({
+      ...c, dealer_ids: ids,
+      province: provinces.size === 1 ? dealerProvince.get(ids[0]) : null,
+      city: cities.size === 1 ? dealerCity.get(ids[0]) : null,
+      splitCity: cities.size > 1,
+    });
+  }
+  console.log(`  ${dealers.length} active dealers, ${listings.length} live new cars, ${catalog.length} msrp_catalog rows.`);
 
   // Group msrp_catalog candidates by year|make|model so each listing's match
   // only searches its own model's trim ladder.
@@ -336,7 +359,7 @@ async function main() {
   const byCity = new Map();
   const cityNames = new Map();   // key -> the spellings the roster used for it
   const provRows = [];           // province read — a city is NOT required here
-  let matched = 0, unmatched = 0, noCity = 0;
+  let matched = 0, unmatched = 0, noCity = 0, twoCities = 0;
   const noCityDealers = new Map();
   for (const l of listings) {
     const key = `${l.year}|${(l.make || "").toLowerCase()}|${(l.model || "").toLowerCase()}`;
@@ -345,13 +368,14 @@ async function main() {
     // purpose: a dealer with no roster city still sells cars in Alberta, and
     // dropping their inventory here would thin the very read the k-floor
     // protects.
-    if (dealerProvince.get(l.dealer_id) === "AB") {
+    if (l.province === "AB") {
       const picked = pickExactCatalogRow(l, catalogByYMM.get(key));
       if (picked) {
         const cls = classifyVsCatalog(picked.price, picked.row);
         if (cls) {
           provRows.push({
             dealer_id: l.dealer_id,
+            dealer_ids: l.dealer_ids,
             dir: cls.dir,
             floorPct: cls.floorPct,
             exact: cls.exact,
@@ -363,21 +387,28 @@ async function main() {
       }
     }
 
-    const raw = dealerCity.get(l.dealer_id);
+    const raw = l.city;
     const city = cityKey(raw);
+    // A car on two dealers' sites in different cities belongs to neither city.
+    if (l.splitCity) { twoCities++; continue; }
     // A dealer with no city silently removes its ENTIRE inventory from the
     // index. Counting that is not enough — name the dealers, or real listings
     // vanish from a published number with nothing to chase.
-    if (!city) { noCity++; noCityDealers.set(l.dealer_id, (noCityDealers.get(l.dealer_id) || 0) + 1); continue; }
+    if (!city) {
+      noCity++;
+      const who = l.dealer_ids.join("+");
+      noCityDealers.set(who, (noCityDealers.get(who) || 0) + 1);
+      continue;
+    }
     if (!cityNames.has(city)) cityNames.set(city, new Set());
     cityNames.get(city).add(raw);
     const m = matchListingToMsrp(l, catalogByYMM.get(key));
     if (!m) { unmatched++; continue; }
     matched++;
     if (!byCity.has(city)) byCity.set(city, []);
-    byCity.get(city).push({ dealer_id: l.dealer_id, deviationPct: m.deviationPct, deviationDollars: m.deviationDollars, updated_at: l.updated_at });
+    byCity.get(city).push({ dealer_id: l.dealer_id, dealer_ids: l.dealer_ids, deviationPct: m.deviationPct, deviationDollars: m.deviationDollars, updated_at: l.updated_at });
   }
-  console.log(`  matched ${matched} listings to a confident MSRP, ${unmatched} unmatched/low-confidence, ${noCity} with no active dealer city.`);
+  console.log(`  matched ${matched} cars to a confident MSRP, ${unmatched} unmatched/low-confidence, ${noCity} with no active dealer city, ${twoCities} listed in two cities (no city index).`);
   if (noCityDealers.size) {
     console.warn(`  ${noCityDealers.size} active dealer(s) have NO city and their listings are excluded entirely:`);
     for (const [id, n] of [...noCityDealers].sort((a, b) => b[1] - a[1]).slice(0, 20)) {
