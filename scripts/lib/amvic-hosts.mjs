@@ -22,6 +22,39 @@ export function toOrigin(raw) {
   } catch { return null; }
 }
 
+// A licensee's display name. AMVIC writes the literal "N/A" where a licensee
+// has no trade name; copied verbatim it named five dealer_source rows "N/A",
+// printed beside prices in the named comps table.
+export function licenseeName(r) {
+  const trade = String(r?.trade_name ?? "").trim();
+  return (trade && !/^n\/?a$/i.test(trade) ? trade : null) || String(r?.name ?? "").trim() || null;
+}
+
+// One entry per host from licensee rows. A website shared by licensees at MORE
+// THAN ONE ROOFTOP (a distinct name or city) is a dealer group's site: it has
+// no single name or city, so both come back null and `rooftops` says how many.
+// Keeping the first licensee instead is how https://www.jpautogroup.com -- the
+// Jim Pattison group's site -- was filed as "AUDI EDMONTON NORTH, Edmonton"
+// and 2,800 of the group's cars were credited to one Audi store (2026-09-24).
+// Two licences with the same name and city (a renewal, a second facility
+// number) are still one rooftop.
+export function rooftopsByHost(rows, keyOf = toOrigin) {
+  const byKey = new Map();
+  for (const r of rows || []) {
+    const key = keyOf(r?.website);
+    if (!key) continue;
+    const e = byKey.get(key) || { row: r, licensees: 0, rooftops: new Set() };
+    e.licensees++;
+    e.rooftops.add(`${String(licenseeName(r) ?? "").toLowerCase()}|${String(r.city ?? "").trim().toLowerCase()}`);
+    byKey.set(key, e);
+  }
+  return new Map([...byKey].map(([key, e]) => {
+    const one = e.rooftops.size === 1;
+    return [key, { key, row: e.row, licensees: e.licensees, rooftops: e.rooftops.size,
+      name: one ? licenseeName(e.row) : null, city: one ? (e.row.city || null) : null }];
+  }));
+}
+
 /** Every distinct, normalized origin among amvic_licensees rows with facility_status = Issued. */
 export async function issuedAmvicHosts(supabase) {
   const licensees = [];

@@ -55,6 +55,13 @@ const PROV_WORDS: Record<string, string> = {
   "prince edward island": "PE",
 };
 
+/** "AB" / "ab" / "Alberta" -> "AB"; anything unrecognised -> null. */
+export function provinceCode(s: unknown): string | null {
+  const t = String(s ?? "").trim();
+  if (/^[a-z]{2}$/i.test(t)) return t.toUpperCase();
+  return PROV_WORDS[t.toLowerCase()] ?? null;
+}
+
 /** Postal-code first letter -> province. Unambiguous for the all-in provinces. */
 const POSTAL: Record<string, string> = { T: "AB", V: "BC", S: "SK", R: "MB", G: "QC", H: "QC", J: "QC", E: "NB", B: "NS", C: "PE", A: "NL" };
 

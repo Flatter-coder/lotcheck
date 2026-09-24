@@ -38,6 +38,7 @@ import { discoverInventoryPages, discoverFromSitemap } from "./lib/inventory-dis
 // catalogue on this and the probe files hosts by it; two copies would drift,
 // and then a host the probe catalogued would be one the scanner cannot find.
 import { toOrigin, originVariants, aspAnswered } from "../supabase/functions/_shared/dealer-catalog.ts";
+import { rooftopsByHost } from "./lib/amvic-hosts.mjs";
 
 const ARG = (name, dflt = null) => { const i = process.argv.indexOf(name); return i > -1 ? process.argv[i + 1] : dflt; };
 const WRITE = process.argv.includes("--write");
@@ -553,7 +554,9 @@ async function candidatesFromAmvic() {
   for (const r of rows) { const k = r.facility_type || "(none)"; byType.set(k, (byType.get(k) || 0) + 1); }
   console.log("Facility types among Issued licensees with a website:");
   for (const [k, n] of [...byType.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log(`   ${String(n).padStart(4)}  ${k}`);
-  return { rows: rows.map((r) => ({ website: r.website, name: r.trade_name || r.name, city: r.city })), total: all.length };
+  // Raw rows: main() names each HOST through rooftopsByHost, which drops AMVIC's
+  // "N/A" placeholder and refuses to name a host shared by several rooftops.
+  return { rows, total: all.length };
 }
 
 // WHO HAS ALREADY TOLD US NO.
@@ -601,13 +604,12 @@ async function candidatesFromOsm() {
 async function main() {
   const { rows } = SOURCE === "amvic" ? await candidatesFromAmvic() : await candidatesFromOsm();
 
-  const byHost = new Map();
-  for (const r of rows) {
-    const host = toOrigin(r.website);
-    if (!host || byHost.has(host)) continue;
-    byHost.set(host, { host, name: r.name || null, city: r.city || null });
-  }
-  let candidates = [...byHost.values()];
+  // One candidate per host. It used to be the FIRST licensee listing the host,
+  // which filed the Jim Pattison group's site as "AUDI EDMONTON NORTH"; a host
+  // shared by several rooftops now carries no name or city, and is refused at
+  // seed time below.
+  let candidates = [...rooftopsByHost(rows, toOrigin).values()]
+    .map((h) => ({ host: h.key, name: h.name, city: h.city }));
   console.log(`${candidates.length} distinct usable hosts (source: ${SOURCE}).`);
 
   // ASK BEFORE KNOCKING. Applied here, before the first request goes out, so a
@@ -796,6 +798,22 @@ async function main() {
     if (rejected.length > 20) console.log(`    … and ${rejected.length - 20} more`);
   }
   if (!seed.length) { console.log("\nnothing left to seed after the license gate"); return; }
+
+  // ONE HOST, ONE ROOFTOP. dealer_source gives a host one name, one city, one
+  // province, and the crawl credits every unit it reads there to that row. A
+  // host AMVIC lists for licensees at several rooftops is a group's site: no
+  // row can be right for it, so it is never promoted. The crawl's rooftopGate
+  // refuses such a feed too; this stops it being seeded at all.
+  // Counted from the same fresh Issued read as the licence gate, whatever the
+  // --source: AMVIC is the authority on who operates at a site, OSM is not.
+  const rooftops = rooftopsByHost(licensees.filter((r) => /issued/i.test(r.facility_status || "")), toOrigin);
+  const multi = seed.filter((s) => (rooftops.get(s.host)?.rooftops ?? 1) > 1);
+  if (multi.length) {
+    console.log(`  ${multi.length} candidate(s) REFUSED — the host is the website of more than one AMVIC rooftop (a group site):`);
+    for (const r of multi.slice(0, 20)) console.log(`    ${r.host}  (${r.platform})`);
+    seed = seed.filter((s) => !multi.includes(s));
+  }
+  if (!seed.length) { console.log("\nnothing left to seed after the one-rooftop gate"); return; }
 
   // THE WRITE WAS A NO-OP. `ignoreDuplicates: true` skips any row whose host is
   // already present — and the AMVIC catalogue build put EVERY Alberta host in

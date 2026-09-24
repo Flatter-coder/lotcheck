@@ -34,6 +34,7 @@
 // edge functions' shared module rather than writing a second copy of VIN
 // validation. One definition, one place to fix.
 import { validateVin } from "../supabase/functions/_shared/invariants.ts";
+import { provinceCode } from "../supabase/functions/_shared/jurisdiction.ts";
 import { extractJsonLdVehicles, discoverCategoryPages, findNextPage, extractEdealerVehicles } from "./lib/structured-inventory.mjs";
 import { parseRobots, isPathAllowed } from "./lib/robots.mjs";
 import { partitionByScope } from "./lib/crawl-blocklist.mjs";
@@ -211,7 +212,12 @@ export function normalizeConvertus(v, sc) {
   // in_transit/on_order used raw truthiness before, so a string "0" (falsy value,
   // truthy string) would have flipped a for-sale car to IN_TRANSIT.
   const flag = (x) => x === true || x === 1 || x === "1";
+  const c = v?.company_data && typeof v.company_data === "object" ? v.company_data : null;
   return {
+    // The rooftop the unit's OWN page names -- read by rooftopGate, never stored.
+    rooftop: c && (strip(c.company_name) || strip(c.company_city))
+      ? { name: strip(c.company_name), city: strip(c.company_city), province: strip(c.company_province) }
+      : null,
     vin: check.vin,
     stock_no: v?.stock_number ?? null,
     year: num(v?.year),
@@ -230,6 +236,44 @@ export function normalizeConvertus(v, sc) {
     damaged: null,                       // Convertus states no equivalent — null, never false
     status: flag(v?.in_transit) ? "IN_TRANSIT" : (flag(v?.on_order) ? "ON_ORDER" : "FOR_SALE"),
   };
+}
+
+// WHOSE CAR IS THIS. A host is filed as ONE dealer_source row -- one name, one
+// city, one province -- and every unit read from it is credited to that row.
+// That holds only for a rooftop's own site. A dealer GROUP's site lists every
+// store in the group from one sitemap: https://www.jpautogroup.com was filed as
+// "AUDI EDMONTON NORTH", and 2,800 units from the whole Jim Pattison group --
+// Toyota, Subaru, Lexus, Hyundai, BC stores included -- were credited to one
+// Audi store in Edmonton, 61 of them duplicating Canyon Creek Toyota's own
+// listings (found 2026-09-24). Each Convertus VDP names its own rooftop
+// (company_data), so the crawl checks before it credits:
+//   * the units name MORE THAN ONE rooftop -> a group feed: credit none;
+//   * the one rooftop they name is in another province or city than the
+//     dealer row -> not this dealer's inventory: credit none.
+// Refusing the whole section, rather than keeping whichever units match, is
+// deliberate: which rooftop the row IS is exactly what a group feed leaves
+// unknown, and missing beats wrong. Units whose page names no rooftop (every
+// non-Convertus platform today) pass unchanged.
+// Returns { rows (without `rooftop`), refused: null | why }. Exported for the test.
+export function rooftopGate(rows, dealer = {}) {
+  const norm = (s) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  const named = new Map();
+  for (const r of rows) {
+    if (r.rooftop) named.set(`${norm(r.rooftop.name)}|${norm(r.rooftop.city)}|${provinceCode(r.rooftop.province) ?? norm(r.rooftop.province)}`, r.rooftop);
+  }
+  if (named.size > 1) {
+    const list = [...named.values()].slice(0, 4).map((rt) => [rt.name, rt.city].filter(Boolean).join(", ")).join("; ");
+    return { rows: [], refused: `group feed: units name ${named.size} rooftops (${list}${named.size > 4 ? "; ..." : ""})` };
+  }
+  const rt = [...named.values()][0];
+  if (rt) {
+    const p = provinceCode(rt.province), dp = provinceCode(dealer.province);
+    if (p && dp && p !== dp) return { rows: [], refused: `units name a rooftop in ${p}; dealer row is ${dp}` };
+    if (rt.city && dealer.city && norm(rt.city) !== norm(dealer.city)) {
+      return { rows: [], refused: `units name a rooftop in ${rt.city}; dealer row is ${dealer.city}` };
+    }
+  }
+  return { rows: rows.map(({ rooftop, ...r }) => r), refused: null };
 }
 
 // "/path?query" for a robots check.
@@ -494,7 +538,7 @@ async function main() {
     const { createClient } = await import("@supabase/supabase-js");
     supabase = createClient(url, key);
     let q = supabase
-      .from("dealer_source").select("id,host,name,sections,platform,platform_id,last_ok_at")
+      .from("dealer_source").select("id,host,name,city,province,sections,platform,platform_id,last_ok_at")
       .eq("active", true).in("platform", ["sm360", "convertus", "jsonld_itemlist", "edealer"])
       // Never crawled first, then longest since a successful crawl. That is
       // what makes a bounded run fair instead of always re-reading the same
@@ -549,7 +593,7 @@ async function main() {
     // drives per-condition delisting (no cross-section masking).
     const seenByCond = { new: [], used: [] };
     const condState = { new: { crawled: false, ok: true }, used: { crawled: false, ok: true } };
-    let failed = false, partial = false;
+    let failed = false, partial = false, refusedWhy = null;
 
     // Each platform names its sections differently: SM360 uses the URL segment
     // (new-inventory), everything else uses the plain new/used it links to.
@@ -594,6 +638,15 @@ async function main() {
         condState[cond].ok = false;
         continue;
       }
+      const gate = rooftopGate(result.rows, d);
+      if (gate.refused) {
+        console.warn(`    ${section}: REFUSED — ${gate.refused}. Nothing credited to ${d.name || d.host}.`);
+        failed = true;
+        refusedWhy = gate.refused;
+        condState[cond].ok = false;
+        continue;
+      }
+      result.rows = gate.rows;
       partial = partial || result.partial;
       if (result.partial) condState[cond].ok = false;
       console.log(`    ${section}: ${result.rows.length} units with valid VINs`);
@@ -640,7 +693,7 @@ async function main() {
         if (error) console.warn(`    delist (${condition}) failed: ${error.message}`);
         else { totals.delisted += data || 0; if (data) console.log(`    ${data} no longer listed (${condition})`); }
       }
-      await supabase.rpc("fn_record_crawl", { p_dealer_id: d.id, p_ok: !failed, p_error: failed ? "crawl failed" : null });
+      await supabase.rpc("fn_record_crawl", { p_dealer_id: d.id, p_ok: !failed, p_error: failed ? (refusedWhy || "crawl failed") : null });
     }
 
     if (failed) totals.failed++;

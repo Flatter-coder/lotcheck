@@ -219,16 +219,25 @@ export function emptyMarketCount(fields = {}) {
   };
 }
 
+// How many dealers a set of rows came from, or null when that cannot be said.
+// Keyed on the RPC's dealerKey (dealer_source id), then name, then city. A row
+// with NO identity -- a car two dealers both list, whose dealer fn_comp_pool
+// refuses to guess -- makes the count unknowable: counting only the named rows
+// printed "at 3 dealers" for a set that came from 4, and keying on the name
+// counted every nameless dealer in one city as one. One definition for every
+// card (the count line, the value band, the older-years ladder).
+export function dealersOfRows(set) {
+  const keys = (set || []).map((r) => r.dealerKey ?? (r.dealerName || r.city || null));
+  if (!keys.length || keys.some((k) => k == null)) return null;
+  return new Set(keys.map((k) => String(k).trim().toLowerCase().replace(/\s+/g, " "))).size;
+}
+
 function stats(set, hasPrice, price) {
-  const named = set.filter((r) => r.dealerName || r.city);
-  const dealers = named.length
-    ? new Set(named.map((r) => String(r.dealerName || r.city).trim().toLowerCase().replace(/\s+/g, " "))).size
-    : null;
   return {
     n: set.length,
     below: hasPrice ? set.filter((r) => Number(r.price) < price).length : 0,
     same: hasPrice ? set.filter((r) => Number(r.price) === price).length : 0,
-    dealers,
+    dealers: dealersOfRows(set),
     seenMin: set.reduce((mn, r) => (r.asOf && (!mn || String(r.asOf) < mn) ? String(r.asOf) : mn), null),
     seenMax: set.reduce((mx, r) => (r.asOf && (!mx || String(r.asOf) > mx) ? String(r.asOf) : mx), null),
   };
@@ -415,10 +424,6 @@ function medianOf(sorted) {
   const n = sorted.length;
   if (!n) return 0;
   return n % 2 ? sorted[(n - 1) / 2] : Math.round((sorted[n / 2 - 1] + sorted[n / 2]) / 2);
-}
-function dealersOfRows(set) {
-  const named = set.filter((r) => r.dealerName || r.city);
-  return named.length ? new Set(named.map((r) => String(r.dealerName || r.city).trim().toLowerCase().replace(/\s+/g, " "))).size : null;
 }
 function seenOf(set) {
   return {

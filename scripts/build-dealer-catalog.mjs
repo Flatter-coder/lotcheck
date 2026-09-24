@@ -27,6 +27,7 @@
 // ============================================================================
 
 import { toOrigin } from "../supabase/functions/_shared/dealer-catalog.ts";
+import { rooftopsByHost } from "./lib/amvic-hosts.mjs";
 
 const ARG = (n, d = null) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : d; };
 const WRITE = process.argv.includes("--write");
@@ -93,21 +94,20 @@ for (const [k, n] of [...byStatus.entries()].sort((a, b) => b[1] - a[1])) consol
 console.log(`${issued.length} of them hold an Issued licence.\n`);
 
 // One row per HOST, not per licensee: several licensees legitimately share a
-// site (a group's rooftops), and the catalogue is keyed on the website.
+// site (a group's rooftops), and the catalogue is keyed on the website. A host
+// shared by more than one rooftop gets NO name and NO city (rooftopsByHost) --
+// naming it after its first licensee filed a whole dealer group as one store.
 const byKey = new Map();
-let unusable = 0;
-for (const r of issued) {
-  const origin = toOrigin(r.website);
-  if (!origin) { unusable++; continue; }
-  const key = origin.toLowerCase().replace(/^https:\/\/www\./, "https://");
-  const prior = byKey.get(key);
-  if (prior) { prior.licensees++; continue; }
+const unusable = issued.filter((r) => !toOrigin(r.website)).length;
+const catalogKey = (w) => toOrigin(w)?.toLowerCase().replace(/^https:\/\/www\./, "https://") ?? null;
+for (const [key, h] of rooftopsByHost(issued, catalogKey)) {
+  const r = h.row;
   byKey.set(key, {
-    key, host: origin,
-    name: (r.trade_name && r.trade_name !== "N/A" ? r.trade_name : null) || r.name || null,
-    city: r.city || null,
+    key, host: toOrigin(r.website),
+    name: h.name,
+    city: h.city,
     amvic_id: r.id, facility_type: r.facility_type || null, licence_status: r.facility_status || null,
-    licensees: 1,
+    licensees: h.licensees,
   });
 }
 
