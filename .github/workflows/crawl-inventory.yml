@@ -37,6 +37,10 @@ on:
         description: "Re-crawl one dealer only, e.g. https://www.citygm.com (blank = all)"
         type: string
         default: ""
+      rebuild_only:
+        description: "Skip the crawl; rebuild the price index and daily report from what is already stored"
+        type: boolean
+        default: false
   schedule:
     # 5am Calgary — after dealers' overnight inventory sync.
     #
@@ -99,7 +103,18 @@ jobs:
           EVENT: ${{ github.event_name }}
           DRY_INPUT: ${{ inputs.dry_run }}
           HOST_INPUT: ${{ inputs.host }}
+          REBUILD_INPUT: ${{ inputs.rebuild_only }}
         run: |
+          # Rebuild-only (2026-09-25): the 09-25 crawl wrote 17,554 observations
+          # and then the price-index step failed, taking the daily report with
+          # it. Re-crawling every dealer just to rerun two readers would knock on
+          # 31 dealers' sites twice in one day, so the readers can run alone on
+          # what is already stored.
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$REBUILD_INPUT" = "true" ]; then
+            echo "rebuild only - no dealer is contacted"
+            echo "wrote=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           ARGS=""
           if [ "$EVENT" = "schedule" ]; then
             DRY=false
