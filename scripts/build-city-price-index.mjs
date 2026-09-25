@@ -320,11 +320,14 @@ async function main() {
   // One row per live CAR, group feeds excluded: fn_listing_once
   // (20260924b_count_a_car_once.sql). A car on two dealers' sites is one car;
   // dealer_id is null for it and dealer_ids names both. Ordered by vin so the
-  // Range pages are stable.
+  // Range pages are stable -- and vin is SELECTED, because PostgREST cannot
+  // order an RPC by a column the select leaves out ("column record.vin does
+  // not exist", HTTP 400). That killed this step and the daily report after
+  // it on 2026-09-25. test-city-price-index.mjs now checks every rpc/ read.
   console.log("Reading dealer_source, fn_listing_once, msrp_catalog...");
   const [dealers, allCars, catalog] = await Promise.all([
     fetchAll(url, headers, "dealer_source", "select=id,city,province,active&active=eq.true&group_feed=is.false"),
-    fetchAll(url, headers, "rpc/fn_listing_once", "select=dealer_id,dealer_ids,year,make,model,trim:trim_name,list_price,sale_price,msrp,updated_at,condition&condition=eq.new&order=vin"),
+    fetchAll(url, headers, "rpc/fn_listing_once", "select=vin,dealer_id,dealer_ids,year,make,model,trim:trim_name,list_price,sale_price,msrp,updated_at,condition&condition=eq.new&order=vin"),
     fetchAll(url, headers, "msrp_catalog", "select=year,make,model,trim,msrp,fuel_type,drivetrain,attrs,price_basis,all_in_price"),
   ]);
   const dealerCity = new Map(dealers.map((d) => [d.id, d.city]));

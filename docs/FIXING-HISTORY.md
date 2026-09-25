@@ -27,6 +27,34 @@ the next instance.
 ---
 ---
 
+## 2026-09-25 — the car-once fix stopped the price index and the daily report
+
+**Shapes:** One-surface fix · Green signal, no check
+
+### What happened
+The 09-25 nightly crawl wrote 17,554 observations across 31 dealers, then its
+next step, "Rebuild city price index", failed with HTTP 400 `column record.vin
+does not exist`, and the daily Alberta inventory report behind it never ran.
+Introduced by 95d7953 (#541), which moved both readers onto `fn_listing_once`.
+The function was right; one reader asked PostgREST to `order=vin` while its
+`select` left `vin` out, and PostgREST cannot order an RPC by an unselected
+column. Measured with the service role against the live API: `select=vin&order=vin`
+200, `select=dealer_id&order=vin` 400. The other reader selected `vin` and was
+fine. #541 was verified through the comps path (a SQL function calling SQL)
+and never through the PostgREST reads the nightly job makes.
+
+### Fix
+0f0e633: the price-index read selects `vin`.
+
+### Guard
+`test:city-index` now fails when any `rpc/` read in `scripts/` orders by a
+column it does not select (it fails on the old query) -- and `test:city-index`
+itself was never in CI; it is now a gate. `crawl-inventory` gained a
+`rebuild_only` dispatch input, so the readers can rerun on stored data without
+contacting any dealer twice in one day.
+
+---
+
 ## 2026-09-24 — a daily freight check that recorded nothing, read 7 of 45 figures, and could not go red
 
 **Shapes:** Green signal, no check · A guard that cannot fail · A field read from the wrong node
