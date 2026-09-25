@@ -22,23 +22,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: Toyota,        script: scrape-toyota.mjs }
-          - { name: Lexus,         script: scrape-lexus.mjs }
-          - { name: Stellantis,    script: scrape-stellantis.mjs }
-          - { name: Genesis,       script: scrape-genesis.mjs }
-          - { name: Hyundai,       script: scrape-hyundai.mjs }
-          - { name: Mazda,         script: scrape-mazda.mjs }
-          - { name: Honda,         script: scrape-honda.mjs }
-          - { name: Acura,         script: scrape-acura.mjs }
-          - { name: MINI,          script: scrape-mini.mjs }
-          - { name: Subaru,        script: scrape-subaru.mjs }
-          - { name: Volkswagen,    script: scrape-vw.mjs }
-          - { name: BMW,           script: scrape-bmw.mjs }
-          - { name: Mercedes-Benz, script: scrape-mercedes-rates.mjs }
-          - { name: Ford,          script: scrape-ford-rates.mjs }
-          - { name: Nissan,        script: scrape-nissan-rates.mjs }
-          - { name: Infiniti,      script: scrape-infiniti-rates.mjs }
-          - { name: GM,            script: scrape-gm-rates.mjs }
+          - { name: Toyota, script: scrape-toyota.mjs, makes: "Toyota" }
+          - { name: Lexus, script: scrape-lexus.mjs, makes: "Lexus" }
+          - { name: Stellantis, script: scrape-stellantis.mjs, makes: "Jeep,Ram,Dodge,Chrysler,Fiat,Alfa Romeo" }
+          - { name: Genesis, script: scrape-genesis.mjs, makes: "Genesis" }
+          - { name: Hyundai, script: scrape-hyundai.mjs, makes: "Hyundai" }
+          - { name: Mazda, script: scrape-mazda.mjs, makes: "Mazda" }
+          - { name: Honda, script: scrape-honda.mjs, makes: "Honda" }
+          - { name: Acura, script: scrape-acura.mjs, makes: "Acura" }
+          - { name: MINI, script: scrape-mini.mjs, makes: "Mini" }
+          - { name: Subaru, script: scrape-subaru.mjs, makes: "Subaru" }
+          - { name: Volkswagen, script: scrape-vw.mjs, makes: "Volkswagen" }
+          - { name: BMW, script: scrape-bmw.mjs, makes: "BMW" }
+          - { name: Mercedes-Benz, script: scrape-mercedes-rates.mjs, makes: "Mercedes-Benz" }
+          - { name: Ford, script: scrape-ford-rates.mjs, makes: "Ford" }
+          - { name: Nissan, script: scrape-nissan-rates.mjs, makes: "Nissan" }
+          - { name: Infiniti, script: scrape-infiniti-rates.mjs, makes: "Infiniti" }
+          - { name: GM, script: scrape-gm-rates.mjs, makes: "Chevrolet,GMC,Buick" }
     name: ${{ matrix.name }} rates
     env:
       CATALOG_RATES_ONLY: "1"
@@ -49,13 +49,34 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Snapshot this make's catalogue rows
+        run: node scripts/catalog-refresh-guard.mjs snapshot
       - name: ${{ matrix.name }} rates
+        id: scrape
         continue-on-error: true
         run: node scripts/${{ matrix.script }}
+      # GREEN MUST MEAN "WROTE FRESH RATES", not "did not crash": a scrape that
+      # finds nothing exits 0 and leaves the old rows. The guard compares
+      # against the snapshot; its outcome is this make's line in the tally.
+      - name: "Guard: ${{ matrix.name }} wrote fresh rate rows"
+        id: verify
+        continue-on-error: true
+        run: node scripts/catalog-refresh-guard.mjs verify --step="${{ matrix.name }} rates" --makes="${{ matrix.makes }}" --finance=required --lease=optional
+      - name: Tally line
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/leg"
+          echo "${{ matrix.name }}|${{ steps.verify.outcome }}" > "$RUNNER_TEMP/leg/${{ strategy.job-index }}.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: apr-leg-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/leg/
+          retention-days: 3
 
-  # The daily report's check mark (20260925_catalog_status.sql). Each make's
-  # leg above is continue-on-error, so a green job result cannot say every
-  # make refreshed -- recorded AMBER with that reason until the legs are tallied.
+  # The daily report's check mark (20260925_catalog_status.sql), from the legs'
+  # own guard outcomes: green only when every make wrote fresh rates; a leg
+  # that left no tally line counts as not refreshed.
   record-status:
     needs: rates
     if: always()
@@ -65,10 +86,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: apr-leg-*
+          path: ${{ runner.temp }}/legs
+          merge-multiple: true
       - name: Record catalogue status
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          echo '{"state":"amber","unit":"makes","covered":null,"of_total":17,"note":"Maker finance rates were re-read for 17 makes; each make is allowed to fail on its own, and which ones did is not tallied yet."}' > "$RUNNER_TEMP/apr.json"
+          node scripts/apr-tally.mjs "$RUNNER_TEMP/legs" .github/workflows/catalog-rates-daily.yml > "$RUNNER_TEMP/apr.json"
+          cat "$RUNNER_TEMP/apr.json"
           node scripts/record-catalog-status.mjs --catalog apr_new --outcome ${{ needs.rates.result }} --summary "$RUNNER_TEMP/apr.json" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
