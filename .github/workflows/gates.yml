@@ -304,6 +304,8 @@ jobs:
         run: npm run test:wayback
       - name: "Inventory discovery: read the dealer's links, do not guess paths"
         run: npm run test:inventory-discovery
+      - name: "Catalogue status: never greener than the refresh, one list in table, writer and page"
+        run: npm run test:catalog-status
       # Was never in CI. 2026-09-25 an rpc/ read that ordered by a column it did
       # not select killed the price index and the daily report behind it.
       - name: "City price index: matching, the publish gate, and rpc/ reads that can run"
