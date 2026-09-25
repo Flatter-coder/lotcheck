@@ -45,7 +45,7 @@ const OWNS_IT = [
   /\bgap in (our|the) (catalogue|read)\b/i,
   /\bsays nothing about the dealer\b/i,
 ];
-const VALUE_OK = /^(NOT CHECKED|NOT READ|NOT CONFIRMED|COULDN'T [A-Z ]+|PRICE READ ONCE|MSRP NOT MATCHED|NO EXACT MSRP MATCH|CHECK ELIGIBILITY|DRIVETRAIN NOT READ|MODEL NOT CONFIRMED)$/;
+const VALUE_OK = /^(NOT CHECKED|NOT READ|NOT CONFIRMED|COULDN'T [A-Z ]+|PRICE READ ONCE|MSRP NOT MATCHED|NOT ENOUGH TO COMPARE|NOT COMPARED|NO EXACT MSRP MATCH|CHECK ELIGIBILITY|DRIVETRAIN NOT READ|MODEL NOT CONFIRMED)$/;
 
 function auditUnchecked(label, b) {
   const p = [];
@@ -257,6 +257,30 @@ console.log("\npart 5 -- green carries its evidence, or it is not green");
   check("too few comparables is never a verdict",
     thin.state === "unchecked" && !/ABOVE|BELOW|MIDDLE/.test(String(thin.value)),
     `${thin.state} ${thin.value}`);
+
+  // A USED CAR NEVER FALLS BACK TO MSRP. 2026-09-25, a used 2024 Civic Sedan
+  // Hybrid: 0 like-for-like listings read, so the market was too thin -- and
+  // point 01 dropped through to the catalogue and printed "MSRP NOT MATCHED"
+  // under the title "Price vs market". A used car has no sticker to miss.
+  const civicMv = { average: null, insufficient: true, nRead: 0, need: 5, yearFrom: 2023, yearTo: 2024,
+    condition: "used", make: "Honda", model: "Civic Sedan", powertrain: "Hybrid", province: "AB", kmLow: 0, kmHigh: 62000 };
+  const civic = reportBands({ quotedPrice: 33500, priceVerified: true, year: 2024, make: "Honda",
+    model: "Civic Sedan", vehicleCondition: "used", marketValue: civicMv }).find((b) => b.n === "01");
+  check("a used car with too few comparables says so, in the market's own words",
+    civic.state === "unchecked" && civic.value === "NOT ENOUGH TO COMPARE", `${civic.state} ${civic.value}`);
+  check("...and never mentions MSRP", !/MSRP|manufacturer/i.test(`${civic.value} ${civic.note}`), civic.note);
+  auditUnchecked("used, too few comparables", civic);
+  const noSet = used(33500, null);
+  check("a used car with no comparison set read: not compared, still no MSRP",
+    noSet.value === "NOT COMPARED" && !/MSRP|manufacturer/i.test(noSet.note), `${noSet.value} -- ${noSet.note}`);
+  auditUnchecked("used, no comparison set", noSet);
+  const stated = reportBands({ quotedPrice: 33500, priceVerified: true, vehicleCondition: "used", msrp: 34990,
+    msrpBasis: "dealer_stated", marketValue: civicMv }).find((b) => b.n === "01");
+  check("a dealer's own MSRP on a used listing does not pull point 01 back to MSRP",
+    stated.value === "NOT ENOUGH TO COMPARE" && !/MSRP/.test(stated.note), `${stated.value} -- ${stated.note}`);
+  const newCar = reportBands({ quotedPrice: 33500, priceVerified: true, vehicleCondition: "new", marketValue: civicMv }).find((b) => b.n === "01");
+  check("a NEW car with no catalogue row still names the catalogue gap",
+    newCar.value === "MSRP NOT MATCHED", newCar.value);
 
   // An exact manufacturer figure still wins: comps are the fallback, not the
   // replacement. [[reference-point-model]]
