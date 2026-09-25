@@ -36,6 +36,7 @@
     "build:city-index:dry": "node scripts/build-city-price-index.mjs --dry-run",
     "build:city-index": "node scripts/build-city-price-index.mjs",
     "test:city-index": "node scripts/test-city-price-index.mjs",
+    "test:cpo-rates": "node scripts/test-cpo-rates.mjs",
     "test:porsche-configurator": "node scripts/test-porsche-configurator.mjs",
     "test:catalog-status": "node scripts/test-catalog-status.mjs",
     "test:market-catalog": "node scripts/test-market-vs-catalog.mjs",
