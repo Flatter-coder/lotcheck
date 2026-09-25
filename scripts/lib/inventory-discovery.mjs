@@ -128,3 +128,34 @@ export function sitemapIndexEntries(xml, origin) {
   }
   return out;
 }
+
+// WHICH PLATFORM IS THIS SITE ON, from markers its own homepage carries.
+// Recorded on a miss, never acted on: on 2026-09-11, 1,154 of 1,639 Alberta
+// dealer sites answered on a platform no detector recognised, so which adapter
+// to build next was a guess. This turns it into a count. First match wins, so
+// the specific vendors sit above the generic CMS markers.
+const PLATFORM_MARKERS = [
+  ["d2c_media", /d2cmedia/i],
+  ["dealer_com", /static\.dealer\.com|pictures\.dealer\.com|ddc-[a-z]+\.js/i],
+  ["dealer_inspire", /dealerinspire/i],
+  ["dealeron", /dealeron\.com|dealeron-/i],
+  ["edealer", /edealer/i],
+  ["sm360", /sm360/i],
+  ["strathcom", /strathcom/i],
+  ["leadbox", /leadbox/i],
+  ["motoinsight", /motoinsight/i],
+  ["autoverify", /autoverify/i],
+  ["foxdealer", /foxdealer/i],
+  ["dealer_eprocess", /dealereprocess/i],
+  ["dealersocket", /dealersocket|dealerfire/i],
+  ["cdk", /cdkglobal|cobalt\.com|cdkdealer/i],
+  ["sincro", /sincro/i],
+  ["carsforsale", /carsforsale/i],
+  ["wordpress", /wp-content\//i],
+];
+export function platformHint(html) {
+  const s = String(html || "");
+  if (!s) return null;
+  for (const [name, re] of PLATFORM_MARKERS) if (re.test(s)) return name;
+  return "unknown";
+}

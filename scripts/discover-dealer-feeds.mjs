@@ -33,7 +33,7 @@
 //   node scripts/discover-dealer-feeds.mjs --limit 40           # probe a sample first
 import { writeFileSync } from "node:fs";
 import { extractJsonLdVehicles, discoverCategoryPages, extractEdealerVehicles } from "./lib/structured-inventory.mjs";
-import { discoverInventoryPages, discoverFromSitemap } from "./lib/inventory-discovery.mjs";
+import { discoverInventoryPages, discoverFromSitemap, platformHint } from "./lib/inventory-discovery.mjs";
 // ONE definition of what a dealer website reduces to. The scanner keys the
 // catalogue on this and the probe files hosts by it; two copies would drift,
 // and then a host the probe catalogued would be one the scanner cannot find.
@@ -215,7 +215,7 @@ async function tryConvertus(host, trace) {
       const r = await fetch(`${host}${path}`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
       if (!r.ok) { note(trace, "convertus", `${path} HTTP ${r.status}`); continue; }
       const html = await r.text();
-      if (!/convertus-vms|convertus\.rocks/i.test(html)) { note(trace, "convertus", `${path} 200, no convertus marker (${Math.round(html.length / 1024)}KB)`); continue; }
+      if (!/convertus-vms|convertus\.rocks/i.test(html)) { note(trace, "convertus", `${path} 200, no convertus marker (${Math.round(html.length / 1024)}KB)`); if (path === "/") note(trace, "fingerprint", platformHint(html)); continue; }
       // The dealer's cp is the page's inventoryId. Confirmed live against three
       // Alberta dealers 2026-08-11 — the older bare-`cp` pattern matched nothing
       // on any of them, which is why earlier probes all reported cp=?.
@@ -302,6 +302,16 @@ async function tryJsonLdItemList(host, trace) {
   } catch (e) { note(trace, "jsonld", `/new/ ${e.name || e.message}`); return null; }
 }
 
+function hintCounts(misses) {
+  const by = {};
+  for (const m of misses) {
+    const f = (m.trace || []).find((t) => t.startsWith("fingerprint: "));
+    const k = f ? f.slice("fingerprint: ".length) : "not fingerprinted";
+    by[k] = (by[k] || 0) + 1;
+  }
+  return Object.fromEntries(Object.entries(by).sort((p, q) => q[1] - p[1]));
+}
+
 // Shape written to --out, both mid-run and at the end. `probed` makes a partial
 // file self-describing: you can see it covered 300 of 800 rather than guessing
 // whether 2 hits means a thin province or a killed job.
@@ -321,6 +331,8 @@ function snapshot(results) {
     // an identical file. They are the larger half of the result and now ship
     // with the reason attached.
     missSummary: missBy,
+    // Which platform each miss runs, from its own homepage (platformHint).
+    platformHints: hintCounts(misses),
     misses: misses.map((m) => ({ host: m.host, city: m.city, name: m.name, miss: m.miss, trace: m.trace })),
   };
 }
@@ -723,6 +735,8 @@ async function main() {
     for (const p of parserBugs) console.log(`     ${p.host.padEnd(42)} ${p.city ?? ""}  ${(p.trace || []).find((t) => /PARSER BUG/.test(t)) || ""}`);
   }
   const reached = results.length - misses.filter((m) => ["blocked", "unreachable", "timeout", "server-error"].includes(m.miss)).length;
+  console.log("\n── Platforms of the sites we could not read (their own homepage markers) ──");
+  for (const [k, n] of Object.entries(hintCounts(misses))) console.log(`  ${String(n).padStart(5)}  ${k}`);
   console.log(`\nCoverage of this run: ${reached}/${results.length} hosts actually answered. A platform count is only`);
   console.log(`as good as that number — the rest were refused, unreachable or timed out.`);
 
