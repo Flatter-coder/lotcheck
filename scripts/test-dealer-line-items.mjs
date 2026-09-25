@@ -146,7 +146,7 @@ console.log("\nevery surface says it, and none of them says 'added on top'");
   check("the emailed PDF takes the fee point from the shared model",
     /\breportBands\s*\(/.test(email),
     "the PDF decided this separately until 2026-09-16");
-  check("the PDF prints the breakdown", /kicker\("THE DEALER'S OWN PRICE BREAKDOWN"\)/.test(email));
+  check("the PDF prints the breakdown", /section\("THE DEALER'S OWN PRICE BREAKDOWN"/.test(email));
   check("the share link carries it", /dli:a\.dealerLineItems/.test(app) && /dealerLineItems:c\.dli/.test(app));
 
   for (const [label, src] of [["the on-screen card", app], ["the PDF", email]]) {

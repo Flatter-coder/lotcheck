@@ -121,7 +121,7 @@ const SURFACES = [
     },
     email: {
       "emailed HTML deck": 'deck.push({ label: "Price depends on financing with the dealer"',
-      "emailed PDF":       'kicker("PRICE DEPENDS ON FINANCING WITH THE DEALER")',
+      "emailed PDF":       'section("PRICE DEPENDS ON FINANCING WITH THE DEALER"',
     },
   },
   {
@@ -142,7 +142,7 @@ const SURFACES = [
     },
     email: {
       "emailed HTML deck": 'deck.push({ label: "Other listings read"',
-      "emailed PDF":       'kicker("OTHER LISTINGS READ")',
+      "emailed PDF":       'section("OTHER LISTINGS READ", line.headline',
       "emailed PDF audit row": 't: "Other listings read"',
     },
   },
@@ -167,7 +167,7 @@ const SURFACES = [
     },
     email: {
       "emailed HTML deck": 'deck.push({ label: line.title, tone: line.tone, glow: line.light === "red"',
-      "emailed PDF":       'kicker(line.title.toUpperCase())',
+      "emailed PDF":       'const mcP = marketCompareLine(a);',
     },
   },
   {
@@ -208,7 +208,7 @@ const SURFACES = [
       "tenPoints core row":         "for (const b of reportBands(a)) {",
       "emailed HTML deck":          'deck.push({ label: "AMVIC"',
       "emailed PDF point explain":  'case "AMVIC"',
-      "emailed PDF supplementary":  'kicker("DEALER LICENCE - AMVIC PUBLIC REGISTRY")',
+      "emailed PDF supplementary":  'section("DEALER LICENCE - AMVIC PUBLIC REGISTRY"',
     },
   },
   {
@@ -229,7 +229,7 @@ const SURFACES = [
     },
     email: {
       "emailed HTML deck": "deck.push({ label: ipLine.title",
-      "emailed PDF":       "kicker(ipLine.title.toUpperCase())",
+      "emailed PDF":       "section(ipLine.title,",
       "Alberta-only gate": "financeCoverageApplies(a)",
     },
   },
@@ -252,7 +252,7 @@ const SURFACES = [
     },
     email: {
       "emailed HTML deck": "deck.push({ label: fcLine.title",
-      "emailed PDF":       "kicker(fcLine.title.toUpperCase())",
+      "emailed PDF":       "section(fcLine.title,",
       // The hardest rule of this line -- never print Alberta statute outside
       // Alberta -- pinned on the emailed surfaces the way it is on the app.
       "Alberta-only gate": "financeCoverageApplies(a)",
@@ -274,7 +274,7 @@ const SURFACES = [
     },
     email: {
       "emailed HTML deck": 'deck.push({ label: oyLine.title',
-      "emailed PDF":       'kicker(oyLine.title.toUpperCase())',
+      "emailed PDF":       'section(oyLine.title,',
     },
   },
   {
@@ -293,7 +293,7 @@ const SURFACES = [
     },
     email: {
       "emailed HTML deck": 'deck.push({ label: "Payment starting point"',
-      "emailed PDF":       'kicker("PAYMENT STARTING POINT")',
+      "emailed PDF":       'section("PAYMENT STARTING POINT", pd.headline',
       "emailed PDF audit row": 't: "Payment starting point"',
     },
   },
@@ -335,7 +335,7 @@ const SURFACES = [
       "shape validation":     "function trimRangeOk",
       "server source map":    "EMAIL_MAKE_SITE",
       "emailed HTML card":    'deck.push({ label: "MSRP per trim"',
-      "emailed PDF section":  'kicker("MSRP PER TRIM")',
+      "emailed PDF section":  'section("MSRP PER TRIM"',
       "emailed PDF nameplate label":  "x.p ? `${x.p}",
       "emailed HTML nameplate label": 'x.p ? escapeHtml(String(x.p))',
     },
