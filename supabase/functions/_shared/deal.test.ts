@@ -91,6 +91,28 @@ const BASE = {
   record(!cs.moves.find((m) => m.topic === "Rate"), "a trusted rate at/below the promo rate does not fire the Rate move");
 }
 
+// ---- buildCounterScript: the "Buy rate" move (S38) -------------------------
+// A finance manager states on tape that he prices just under whatever rate the
+// buyer discloses first, not against a fixed spread over the bank's buy rate.
+// The "Rate" move above needs a published promo rate AND a quoted dealer rate
+// to compare; this move heads off the anchoring before either exists, so it
+// must fire with no financeRates at all -- the emptiest analysis possible.
+{
+  const cs = buildCounterScript({ make: "Ford", quotedPrice: 36999 });
+  const m = cs.moves.find((x) => x.topic === "Buy rate");
+  record(!!m, "Buy rate move fires on a bare analysis with no financing data whatsoever");
+  record(!!m && /buy rate/i.test(m.say) && !/\d/.test(m.say),
+    "asks for the buy rate by name and states no number of its own (nothing to fabricate)");
+}
+{
+  // Must still fire alongside the Rate move -- they answer different
+  // questions (published-rate gap vs. don't-anchor-first) and neither
+  // substitutes for the other.
+  const a = { ...BASE, financeRates: { ...BASE.financeRates, dealer: { apr: 25, source: "llm" } }, financing: { rate: 25 } };
+  const cs = buildCounterScript(a);
+  record(!!cs.moves.find((m) => m.topic === "Buy rate"), "Buy rate move still fires when other financing moves are also present");
+}
+
 // ---- buildCounterScript: the "Warranty" move ------------------------------
 // 2026-08-20 incident: a 2022 RAV4 at 106,000 km got the generic "I'll pass
 // on the extended warranty -- the factory coverage is plenty for now" line

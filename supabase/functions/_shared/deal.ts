@@ -332,6 +332,15 @@ export function buildCounterScript(analysis: any): CounterScript {
   if (dApr != null && pApr != null && dApr > pApr + 0.1 && !analysis?.financingTrap) {
     moves.push({ topic: "Rate", say: `I see a ${pApr}% promo rate advertised — I'd want that, not ${dApr}%.` });
   }
+  // S38 — buy-rate anchoring. A finance manager states it plainly on tape: he
+  // doesn't beat a buyer's own pre-approval rate, he prices just under it. The
+  // manufacturer promo comparison above (the "Rate" move) needs a published
+  // rate to exist and compares to a generic figure; this needs neither — it is
+  // the one move that heads off the anchoring before any rate is quoted at
+  // all, so it is unconditional like S19/S30 below, not gated on financeRates.
+  {
+    moves.push({ topic: "Buy rate", say: `Before we talk numbers — what's the buy rate the bank actually gave you on this loan? I want that first, not the other way around.` });
+  }
 
   const clean = moves.length === 0;
   // S19 — a first "no discount" from a BDC/salesperson isn't the floor; the price
