@@ -12,7 +12,7 @@
 // Auto Sales, Adrenalin Motors, Wrenches Automotive.
 //
 // The fixtures below are the real URL shapes from that run.
-import { discoverInventoryPages, discoverFromSitemap, sitemapIndexEntries } from "./lib/inventory-discovery.mjs";
+import { discoverInventoryPages, discoverFromSitemap, sitemapIndexEntries, platformHint } from "./lib/inventory-discovery.mjs";
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
@@ -113,6 +113,14 @@ check("a plain urlset is not mistaken for an index", sitemapIndexEntries(sm, "ht
 // clean. Assert it still recognises the single most common shape.
 check("the hint list still recognises a bare /inventory/",
   discoverInventoryPages(page("/inventory/"), "https://example.ca").length === 1);
+
+// Platform fingerprint (2026-09-25): a count of which platform the unreadable
+// sites run, so the next adapter goes where most dealers are.
+check("a D2C Media site is named, even beside WordPress markers",
+  platformHint('<script src="https://cdn.d2cmedia.ca/x.js"></script><link href="/wp-content/a.css">') === "d2c_media");
+check("a Dealer.com site is named", platformHint('<img src="https://pictures.dealer.com/a.jpg">') === "dealer_com");
+check("a page with no known marker is 'unknown', never a guess", platformHint("<html><body>Welcome</body></html>") === "unknown");
+check("no page, no hint", platformHint("") === null);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
