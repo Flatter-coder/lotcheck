@@ -63,6 +63,28 @@ console.log("card 12 -- APR vs the maker (new) / used vs new (used)");
   check("with it: the gap, and the cheapest new car named", usedVsNewCard(nf).state === "raise" && usedVsNewCard(nf).value === "$2,139 MORE THAN NEW" && /2026 RAV4 LE Hybrid/.test(usedVsNewCard(nf).short), JSON.stringify(usedVsNewCard(nf)));
 }
 
+console.log("card 05 -- what the loan costs");
+{
+  // The real 2025 HR-V listing, 2026-09-25: 416 weekly payments of $111.28 at
+  // 7.99% over 96 months printed RECONCILES in green, nothing about interest.
+  const hrv = { ...USED, year: 2025, make: "Honda", model: "HR-V", quotedPrice: 33995,
+    financing: { paymentAmount: 111.28, termMonths: 96, paymentFrequency: "weekly", totalObligation: 48605.44, rate: 7.99, source: "page_text" },
+    financingCheck: { checked: true, consistent: true, note: "416 payments of $111.28 (about $46,292 before tax) reconcile with the disclosed total of $48,605.44 once sales tax is added." } };
+  const c = reportCards(hrv)[4];
+  check("a 96-month loan is raised, with its interest in dollars", c.state === "raise" && c.value === "$12,107 INTEREST", `${c.state} ${c.value}`);
+  check("...worked out from the listing's own payment, rate and term", /416 weekly payments of \$111\.28 at 7\.99% come to \$46,292/.test(c.short), c.short);
+  check("...and the suggestion is a shorter term, not an accusation", /shorter term/.test(c.suggestion) && !/overcharg|rip|gouge|predator/i.test(`${c.short} ${c.suggestion}`), c.suggestion);
+  const sixty = { ...hrv, financing: { ...hrv.financing, termMonths: 60, paymentAmount: 158 } };
+  const s = reportCards(sixty)[4];
+  check("a 60-month loan that reconciles stays verified, and still states its interest", s.state === "clear" && /^About \$[\d,]+ of this loan is interest/.test(s.short), `${s.state} ${s.short}`);
+  const guess = { ...hrv, financing: { ...hrv.financing, source: "llm" } };
+  check("a rate a model guessed never prints a dollar figure", reportCards(guess)[4].value === "RECONCILES" && !/interest/i.test(reportCards(guess)[4].short));
+  const noTotal = { ...hrv, financingCheck: null };
+  check("payment, rate and term with no total: the cost still stands", reportCards(noTotal)[4].value === "$12,107 INTEREST" && reportCards(noTotal)[4].state === "raise");
+  const bad = { ...hrv, financingCheck: { checked: true, consistent: false, note: "does not reconcile" } };
+  check("payments that do not add up still say so first", reportCards(bad)[4].value === "DOESN'T ADD UP" && /amortisation/.test(reportCards(bad)[4].suggestion));
+}
+
 console.log("card 13 -- freight & PDI");
 {
   const f = freightCard(NEW);
