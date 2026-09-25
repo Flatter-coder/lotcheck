@@ -126,6 +126,10 @@ const VOCAB = {
     why: "Warranty. The catalogue row was hedged or absent, so the remaining cover is not asserted." },
   "MSRP UNVERIFIED":   { asserts: "us",      backed: false },
   "PRICE READ ONCE":   { asserts: "us",      backed: false },
+  // Used cars, 2026-09-25: point 01 measures against the market, so a thin or
+  // unread set names OUR read as the gap -- never an MSRP the car never had.
+  "NOT ENOUGH TO COMPARE": { asserts: "us", backed: false },
+  "NOT COMPARED":      { asserts: "us",      backed: false },
   "UNVERIFIED":        { asserts: "us",      backed: false },
   // -- recalls -------------------------------------------------------------
   "NONE OPEN":         { asserts: "result",  backed: true,  why: "gated on recalls.checked === true && count === 0 && confirmed !== false" },

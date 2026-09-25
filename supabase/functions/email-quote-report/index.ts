@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-09-24a";  // 24a: the Hub & Spoke redesign -- page 1 is thirteen cards around the car, page 2 the summary and thank-you; the full detail follows unchanged.
+const PDF_BUILDER_VER = "2026-09-25a";  // 25a: a used car too thin to compare says so on point 01, never "MSRP NOT MATCHED". 24a: the Hub & Spoke redesign -- page 1 is thirteen cards around the car, page 2 the summary and thank-you; the full detail follows unchanged.
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";

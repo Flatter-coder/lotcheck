@@ -204,8 +204,20 @@ function priceBand(a) {
     // favour. [[traffic-column-report-direction]]
     return band("price_vs_msrp", "01", NOTED, mc.value, mc.headline, { hero: true, scale });
   }
+  // A USED CAR NEVER FALLS BACK TO MSRP. When the market set was too thin (or
+  // not read), this used to drop through to the catalogue paths below and print
+  // "MSRP NOT MATCHED" under the title "Price vs market": a 2024 Civic Sedan
+  // Hybrid with 0 like-for-like listings in Alberta, 2026-09-25. A used car has
+  // no sticker to miss; the gap is in our market read, so the market line says
+  // it -- one author, same words as the market section. [[one-report-new-and-used]]
+  const cond = String(a?.vehicleCondition || "").toLowerCase();
+  const usedCar = cond !== "" && cond !== "new";
+  if (usedCar && qp > 0 && pv) {
+    return gap("price_vs_msrp", "01", mc.value,
+      `${mc.body} This listing asks ${fmtMoney(qp)}; that is a gap in our read, not a finding about the price.`);
+  }
 
-  if (ms > 0 && qp > 0) {
+  if (ms > 0 && qp > 0 && !usedCar) {
     // WHOSE NUMBER IS THIS? The old copy said "the nearest figure we hold is
     // $X" for whatever sat in a.msrp -- and when the basis is dealer_stated,
     // a.msrp IS THE DEALER'S OWN NUMBER, read off their page. On a 2026 4Runner
