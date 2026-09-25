@@ -1,0 +1,26 @@
+# TEMPORARY read-only diagnostic (2026-09-25): which PostgREST query shapes on
+# rpc/fn_listing_once fail with "column record.vin does not exist". Runs only on
+# push to diag/listing-once. Prints status + first 300 chars; never the key.
+name: diag listing once
+on:
+  push:
+    branches: [diag/listing-once]
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query shapes
+        env:
+          U: ${{ secrets.SUPABASE_URL }}
+          K: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          q() { echo "== $1 $2"; curl -s -o out.txt -w "HTTP %{http_code}\n" -X "$1" "$U/rest/v1/rpc/fn_listing_once?$2" -H "apikey: $K" -H "authorization: Bearer $K" -H "content-type: application/json" -H "Range: 0-1" ${3:+-d "$3"}; head -c 300 out.txt; echo; }
+          q GET "select=vin&limit=1"
+          q GET "select=vin&order=vin&limit=1"
+          q GET "select=dealer_id&order=vin&limit=1"
+          q GET "select=vin,condition&condition=eq.new&limit=1"
+          q GET "select=vin,trim:trim_name&limit=1"
+          q GET "select=dealer_id,dealer_ids,year,make,model,trim:trim_name,list_price,sale_price,msrp,updated_at,condition&condition=eq.new&order=vin"
+          q POST "select=vin,dealer_id,dealer_ids,condition,first_seen_on&order=vin&limit=1" '{"p_day":"2026-09-24"}'
+          q GET "select=vin,dealer_id&p_day=2026-09-24&order=vin&limit=1"
+          curl -s -I "$U/rest/v1/" -H "apikey: $K" | grep -i "server\|postgrest" || true
