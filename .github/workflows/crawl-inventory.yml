@@ -107,6 +107,7 @@ jobs:
           DRY_INPUT: ${{ inputs.dry_run }}
           HOST_INPUT: ${{ inputs.host }}
           CATALOG_STATUS_OUT: ${{ runner.temp }}/inventory-status.json
+          CATALOG_STATUS_FEES_OUT: ${{ runner.temp }}/fees-status.json
           REBUILD_INPUT: ${{ inputs.rebuild_only }}
         run: |
           # Rebuild-only (2026-09-25): the 09-25 crawl wrote 17,554 observations
@@ -185,3 +186,10 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/record-catalog-status.mjs --catalog price_compare --outcome ${{ steps.index.outcome }} --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      # Dealer fees are read by the same crawl (SM360 dealers state them per car).
+      - name: Record catalogue status (dealer fees)
+        if: ${{ always() && steps.crawl.outputs.dry == 'false' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/record-catalog-status.mjs --catalog dealer_fees --outcome ${{ steps.crawl.outcome }} --summary "${{ runner.temp }}/fees-status.json" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

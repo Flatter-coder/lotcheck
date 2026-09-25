@@ -306,6 +306,8 @@ jobs:
         run: npm run test:inventory-discovery
       - name: "Catalogue status: never greener than the refresh, one list in table, writer and page"
         run: npm run test:catalog-status
+      - name: "Dealer fees: only what a dealer's own sentence states, counted per car"
+        run: npm run test:dealer-fees
       - name: "Porsche MSRP: read from the configurator Porsche itemises, basis stated"
         run: npm run test:porsche-configurator
       # Was never in CI. 2026-09-25 an rpc/ read that ordered by a column it did
