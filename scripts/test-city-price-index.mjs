@@ -157,5 +157,27 @@ check("display prettifies when the roster only ever shouted",
 check("display drops a province suffix the roster tacked on",
   prettyCity(["LEDUC, AB"]) === "Leduc", `got ${JSON.stringify(prettyCity(["LEDUC, AB"]))}`);
 
+// PostgREST cannot order an RPC by a column its select leaves out: 2026-09-25,
+// rpc/fn_listing_once?select=dealer_id,...&order=vin -> HTTP 400 "column
+// record.vin does not exist" (measured against the live API), which stopped
+// this builder and the daily inventory report behind it. Every rpc/ read in
+// the scripts that orders must select what it orders by.
+{
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const dir = new URL(".", import.meta.url);
+  const bad = [];
+  for (const f of readdirSync(dir).filter((n) => n.endsWith(".mjs"))) {
+    const src = readFileSync(new URL(f, dir), "utf8");
+    for (const m of src.matchAll(/"rpc\/[a-z_]+",\s*"([^"]*order=[^"]*)"/g)) {
+      const q = new URLSearchParams(m[1]);
+      const sel = (q.get("select") || "*").split(",").map((c) => c.split(":").pop().trim());
+      for (const o of (q.get("order") || "").split(",").map((c) => c.split(".")[0]).filter(Boolean)) {
+        if (!sel.includes("*") && !sel.includes(o)) bad.push(`${f}: orders by ${o}, selects ${sel.join(",")}`);
+      }
+    }
+  }
+  check("every rpc/ read that orders also selects the order column", bad.length === 0, bad.join("\n        "));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
