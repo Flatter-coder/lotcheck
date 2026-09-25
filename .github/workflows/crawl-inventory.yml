@@ -59,7 +59,10 @@ on:
     # scripts/test-crawl-blocklist.mjs fails the build if the crawler stops
     # consulting the list. A condition enforced only by what happens to be in
     # dealer_source is a condition with nothing behind it.
-    - cron: "0 11 * * *"
+    # TWICE DAILY (Vic 2026-09-25: every catalogue at 6am and midnight Calgary).
+    # 06 and 12 UTC are midnight and 6am MDT (an hour earlier in MST). GitHub
+    # starts these hours late, so the exact-time trigger is a separate step.
+    - cron: "11 6,12 * * *"
 
 jobs:
   crawl:

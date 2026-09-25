@@ -13,7 +13,10 @@ name: Catalog rates (daily)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 10 * * *"   # daily, 10:00 UTC (~4am Calgary)
+    # TWICE DAILY (Vic 2026-09-25: every catalogue at 6am and midnight Calgary).
+    # 06 and 12 UTC are midnight and 6am MDT (an hour earlier in MST). GitHub
+    # starts these hours late, so the exact-time trigger is a separate step.
+    - cron: "7 6,12 * * *"
 jobs:
   rates:
     runs-on: ubuntu-latest
