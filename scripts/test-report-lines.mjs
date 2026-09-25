@@ -295,6 +295,7 @@ console.log("\n-- likeForLikePool + marketCompareLine --");
   check("... printed years never include a model year that was not read", rx26.yearFrom === 2025 && rx26.yearTo === 2025, `${rx26.yearFrom}-${rx26.yearTo}`);
   const rx24 = likeForLikePool(RX, { model: "RX", trim: "350 Luxury AWD", year: 2024, condition: "used", odometerKm: 30000 });
   check("2024 RX 350, 30,000 km: 6 gas rows within a year and 62,000 km, all trims, no hybrid", rx24.scope === "model" && rx24.rows.length === 6 && rx24.rows.every((r) => !/h$/.test(r.trim)) && rx24.kmHigh === 62000, JSON.stringify({ scope: rx24.scope, n: rx24.rows.length }));
+  check("... and names the same-scope row the mileage window left out (80,308 km), never a hybrid", rx24.outKm.length === 1 && rx24.outKm[0].odometerKm === 80308, JSON.stringify(rx24.outKm));
   const stale = likeForLikePool(RX.map((r, i) => (i === 1 ? { ...r, asOf: "2026-07-01" } : r)), { model: "RX", trim: "350 Luxury AWD", year: 2024, condition: "used", odometerKm: 30000, today: "2026-09-02" });
   check("the count line's 30-day window applies here too: a row last seen before it is not read", stale.rows.length === 5 && stale.nRead === 5, `${stale.rows.length}`);
   const hyb = likeForLikePool(RX, { model: "RX", trim: "350h Luxury", year: 2024, condition: "used", odometerKm: 20000, minRows: 2 });
@@ -377,7 +378,7 @@ console.log("\n-- likeForLikePool + marketCompareLine --");
   const { canonicalReport } = await import("../supabase/functions/_shared/report-sign.ts");
   const full = { ...A, vehicle: "2024 Lexus RX 350 Luxury AWD", quotedPrice: 59900, marketValue: mv6 };
   const c = canonicalReport(full);
-  check("the canonical is at its current version and seals the basis keys", c.v === 15 && c.marketValue.mk === "Lexus" && c.marketValue.pv === "AB" && c.marketValue.from === "2026-08-03", JSON.stringify(c.marketValue));
+  check("the canonical is at its current version and seals the basis keys", c.v === 16 && c.marketValue.mk === "Lexus" && c.marketValue.pv === "AB" && c.marketValue.from === "2026-08-03", JSON.stringify(c.marketValue));
   // v15: the listings behind the figures are SEALED (compact), and read back
   // through normMv as the same rows -- so the PDF's compare page prints what
   // was signed, never a second read.
@@ -402,6 +403,19 @@ console.log("\n-- likeForLikePool + marketCompareLine --");
     two.length === 2 && two[0].price === 38900 && two[1].price === 39998, JSON.stringify(two));
   check("sampleOf never prints 'N/A' as a dealer", sampleOf(pool, 48210).find((r) => r.price === 41900).dealer === null);
   check("sampleOf caps at seven", sampleOf(Array.from({ length: 12 }, (_, i) => ({ price: 30000 + i, odometerKm: 40000 + i * 100 })), 40000).length === 7);
+  // v16: the shortlist page walks EVERY listing read in the chosen scope, each
+  // with why it was left out -- the kept set first, then price outliers, then
+  // the mileage window's leavers. Sealed, so the PDF never re-reads.
+  const { poolOf } = await import("../supabase/functions/_shared/marketvalue.ts");
+  const far = { price: 36500, odometerKm: 197187, year: 2023, trim: "XLE", city: "Edmonton", dealerName: "Audi Edmonton North", asOf: "2026-08-18" };
+  const junk = { price: 9000, odometerKm: 47000, year: 2024, trim: "XLE", city: "Calgary", dealerName: "Somewhere", asOf: "2026-08-18" };
+  const pl = poolOf(pool, [...pool, junk], [far], 48210);
+  check("poolOf lists the kept set first, then the price outlier, then the mileage leaver, each tagged",
+    pl.length === 6 && pl.slice(0, 4).every((r) => r.out === null) && pl[4].out === "price" && pl[4].price === 9000 && pl[5].out === "km" && pl[5].km === 197187, JSON.stringify(pl.map((r) => [r.price, r.out])));
+  const cp = canonicalReport({ ...full, marketValue: { ...mv6, sample: sampleRows, pool: pl, otherTrims: 11 } });
+  check("v16 seals the pool compactly with its reasons, and how many other trims were set aside",
+    cp.marketValue.pool.length === 6 && cp.marketValue.pool[5].x === "km" && cp.marketValue.pool[0].x === null && cp.marketValue.ot === 11, JSON.stringify(cp.marketValue.pool));
+  check("a report with no pool seals an empty list", Array.isArray(c.marketValue.pool) && c.marketValue.pool.length === 0, JSON.stringify(c.marketValue.pool));
   const viaVerify = marketCompareLine(verifyArg(c));
   check("the signed canonical round-trips the FULL sentence (make, model, province, dates, dealers)", JSON.stringify(viaVerify.lines) === JSON.stringify(am.lines) && viaVerify.light === am.light && viaVerify.title === am.title, JSON.stringify(viaVerify.lines));
   const cNone = canonicalReport({ ...A, year: 2026, vehicle: "2026 Lexus RX 350 Luxury AWD", quotedPrice: 69898, marketValue: MVN });
@@ -494,7 +508,7 @@ console.log("\n-- olderYearsLadder + olderYearsLine --");
   // Sealed round trip through the SERVER canonical, fed as /verify feeds it.
   const { canonicalReport } = await import("../supabase/functions/_shared/report-sign.ts");
   const cc = canonicalReport({ ...A, vehicle: "2026 Lexus RX 350 Luxury AWD", quotedPrice: 69898, olderYears: OY });
-  check("the canonical is at its current version and seals every rung with its basis", cc.v === 15 && cc.oy && cc.oy.st === "confirmed" && cc.oy.r.length === 3 && cc.oy.r[0].kl === 11223 && cc.oy.r[0].kn === 5 && cc.oy.r[0].rd === 5 && cc.oy.r[0].to === "2026-08-18" && cc.oy.mk === "Lexus" && cc.oy.from === "2026-08-03", JSON.stringify(cc.oy).slice(0, 300));
+  check("the canonical is at its current version and seals every rung with its basis", cc.v === 16 && cc.oy && cc.oy.st === "confirmed" && cc.oy.r.length === 3 && cc.oy.r[0].kl === 11223 && cc.oy.r[0].kn === 5 && cc.oy.r[0].rd === 5 && cc.oy.r[0].to === "2026-08-18" && cc.oy.mk === "Lexus" && cc.oy.from === "2026-08-03", JSON.stringify(cc.oy).slice(0, 300));
   const viaVerify = olderYearsLine({ price: cc.price, oy: cc.oy, fcx: cc.fcx });
   check("the signed canonical round-trips the SAME lines (make, model, province, dates, dealers, ranges)", JSON.stringify(viaVerify.lines) === JSON.stringify(c.lines) && viaVerify.value === c.value && viaVerify.headline === c.headline && viaVerify.meta === c.meta, JSON.stringify(viaVerify.lines));
   const ccOut = canonicalReport({ ...A, quotedPrice: 69898, olderYears: { ...lo, make: "Lexus", model: "RX", province: "AB" } });

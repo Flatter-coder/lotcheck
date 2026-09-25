@@ -70,6 +70,15 @@ export interface MarketValue {
   // on the same fact. Up to SAMPLE_MAX of the kept rows, closest in odometer to
   // the subject. [[two-authors-per-fact]]
   sample?: MarketSampleRow[] | null;
+  // Canonical v16 (2026-09-25): every listing the shortlist page walks through
+  // -- the kept set, plus what the price-outlier trim ("price") and the mileage
+  // window ("km") left out -- and how many other trims were read and set aside.
+  pool?: MarketPoolRow[] | null;
+  otherTrims?: number | null;
+}
+
+export interface MarketPoolRow extends MarketSampleRow {
+  out: "price" | "km" | null;   // why the comparison left it out; null = in the set
 }
 
 export interface MarketSampleRow {
@@ -84,6 +93,8 @@ export interface MarketSampleRow {
 
 // Vic, 2026-09-24: "5 or 7 comparisons". Seven is also what fits a printed page.
 export const SAMPLE_MAX = 7;
+// What one printed shortlist page holds.
+export const POOL_MAX = 18;
 
 /** The listings a report prints: closest in odometer to the subject (cheapest
  *  first on a tie, or when the subject has no odometer), then shown by price. */
@@ -91,21 +102,38 @@ export function sampleOf(rows: any[], subjectKm?: number | null, max = SAMPLE_MA
   const km = Number(subjectKm);
   const hasKm = Number.isFinite(km) && km > 0;
   const dist = (r: any) => (hasKm && r?.odometerKm != null && Number.isFinite(Number(r.odometerKm)) ? Math.abs(Number(r.odometerKm) - km) : Number.MAX_SAFE_INTEGER);
-  const noName = (v: any) => !v || /^\s*n\/?a\s*$/i.test(String(v));
   return (Array.isArray(rows) ? rows : [])
     .filter((r) => Number(r?.price) > 0)
     .sort((a, b) => (hasKm ? dist(a) - dist(b) : 0) || Number(a.price) - Number(b.price))
     .slice(0, max)
-    .map((r) => ({
-      price: Number(r.price),
-      km: r.odometerKm != null && Number.isFinite(Number(r.odometerKm)) ? Number(r.odometerKm) : null,
-      year: Number(r.year) > 0 ? Number(r.year) : null,
-      trim: r.trim ? String(r.trim) : null,
-      city: r.city ? String(r.city) : null,
-      dealer: noName(r.dealerName) ? null : String(r.dealerName),
-      asOf: r.asOf ? String(r.asOf) : null,
-    }))
+    .map(sampleRow)
     .sort((a, b) => a.price - b.price);
+}
+
+const noName = (v: any) => !v || /^\s*n\/?a\s*$/i.test(String(v));
+function sampleRow(r: any): MarketSampleRow {
+  return {
+    price: Number(r.price),
+    km: r.odometerKm != null && Number.isFinite(Number(r.odometerKm)) ? Number(r.odometerKm) : null,
+    year: Number(r.year) > 0 ? Number(r.year) : null,
+    trim: r.trim ? String(r.trim) : null,
+    city: r.city ? String(r.city) : null,
+    dealer: noName(r.dealerName) ? null : String(r.dealerName),
+    asOf: r.asOf ? String(r.asOf) : null,
+  };
+}
+
+/** The shortlist page's rows: the kept set first (closest in odometer), then
+ *  the price outliers, then the mileage window's leavers, to POOL_MAX. */
+export function poolOf(kept: any[], priced: any[], outKm: any[], subjectKm?: number | null, max = POOL_MAX): MarketPoolRow[] {
+  const inSet = new Set(kept);
+  const outliers = (priced || []).filter((r) => !inSet.has(r));
+  const tag = (rows: MarketSampleRow[], out: MarketPoolRow["out"]) => rows.map((r) => ({ ...r, out }));
+  return [
+    ...tag(sampleOf(kept, subjectKm, max), null),
+    ...tag((outliers || []).filter((r) => Number(r?.price) > 0).map(sampleRow), "price"),
+    ...tag((outKm || []).filter((r) => Number(r?.price) > 0).map(sampleRow), "km"),
+  ].slice(0, max);
 }
 
 // The CPO "fee" is a market PREMIUM, not a line item: what a certified car costs
@@ -540,6 +568,8 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
       nKept: band.n,
       ...basisOf(kept),
       sample: sampleOf(kept, mileage),
+      pool: poolOf(kept, pool.rows, (pool as any).outKm || [], mileage),
+      otherTrims: Number((pool as any).otherTrims) || 0,
     };
     // CPO premium: only for a certified subject, against the NON-certified comps
     // in the same pool. computeCpoPremium is min-comps gated and returns a
