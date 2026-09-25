@@ -40,6 +40,7 @@ import { parseRobots, isPathAllowed } from "./lib/robots.mjs";
 import { partitionByScope } from "./lib/crawl-blocklist.mjs";
 import { politeFetch, requestLedger } from "./lib/polite-fetch.mjs";
 import { extractConvertusVmsRoot } from "../supabase/functions/_shared/convertus-vms.js";
+import { sm360VehicleFees } from "../supabase/functions/_shared/sm360-fees.js";
 import { pathToFileURL } from "node:url";
 import { appendFileSync, writeFileSync } from "node:fs";
 
@@ -380,8 +381,24 @@ async function fetchPage(host, section, page) {
 // Walks every page of one section. Throws on the FIRST page failing (we have
 // nothing, so skip the dealer); a later page failing stops pagination but keeps
 // what we already have, and reports partial so the caller can skip delisting.
+// One row per basis, fee name and amount, with how many cars stated it.
+export function feeRows(dealerId, statements, day) {
+  const by = new Map();
+  for (const st of statements || []) for (const f of st.fees || []) {
+    const k = `${st.basis}|${f.name}|${f.amount}`;
+    const cur = by.get(k) || { dealer_id: dealerId, observed_on: day, basis: st.basis, fee_name: f.name, fee_label: f.feeLabel, amount: f.amount, vehicles: 0, source: "sm360_feed" };
+    cur.vehicles++;
+    by.set(k, cur);
+  }
+  return [...by.values()];
+}
+const todayEdmonton = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Edmonton" });
+
 async function crawlSection(host, section) {
   const rows = [];
+  // The dealer's own fee sentence on each vehicle (_shared/sm360-fees.js),
+  // kept per VIN so the rooftop gate below can drop a refused car's fees too.
+  const fees = [];
   let pages = 1, partial = false;
   for (let page = 1; page <= Math.min(pages, PAGE_CAP); page++) {
     let data;
@@ -396,14 +413,17 @@ async function crawlSection(host, section) {
     if (page === 1) pages = num(data?.pagination?.numberOfPages) || 1;
     const vehicles = data?.vehicles || [];
     if (!vehicles.length) break;
-    for (const v of vehicles) { const row = normalizeSm360(v, section); if (row) rows.push(row); }
+    for (const v of vehicles) {
+      const row = normalizeSm360(v, section);
+      if (row) { rows.push(row); fees.push({ vin: row.vin, statements: sm360VehicleFees(v) }); }
+    }
     if (page < Math.min(pages, PAGE_CAP)) await sleep(effectiveDelayMs);
   }
   if (pages > PAGE_CAP) {
     console.warn(`    ${section}: ${pages} pages exceeds cap ${PAGE_CAP} — crawled ${PAGE_CAP}, rest skipped`);
     partial = true;
   }
-  return { rows, partial };
+  return { rows, partial, fees };
 }
 
 // ── jsonld_itemlist ─────────────────────────────────────────────────────────
@@ -585,7 +605,7 @@ async function main() {
     }
   }
 
-  let totals = { dealers: 0, rows: 0, upserted: 0, new: 0, priced: 0, delisted: 0, failed: 0, robotsSkipped: 0 };
+  let totals = { dealers: 0, rows: 0, upserted: 0, new: 0, priced: 0, delisted: 0, failed: 0, robotsSkipped: 0, feeDealersRead: 0, feeDealersPublished: 0 };
 
   for (const d of dealers) {
     console.log(`${d.name || d.host}`);
@@ -594,6 +614,7 @@ async function main() {
     const seenByCond = { new: [], used: [] };
     const condState = { new: { crawled: false, ok: true }, used: { crawled: false, ok: true } };
     let failed = false, partial = false, refusedWhy = null;
+    const feeStatements = [];
 
     // Each platform names its sections differently: SM360 uses the URL segment
     // (new-inventory), everything else uses the plain new/used it links to.
@@ -647,6 +668,10 @@ async function main() {
         continue;
       }
       result.rows = gate.rows;
+      if (result.fees) {
+        const kept = new Set(result.rows.map((r) => r.vin));
+        for (const f of result.fees) if (kept.has(f.vin)) feeStatements.push(...f.statements);
+      }
       partial = partial || result.partial;
       if (result.partial) condState[cond].ok = false;
       console.log(`    ${section}: ${result.rows.length} units with valid VINs`);
@@ -694,6 +719,22 @@ async function main() {
         else { totals.delisted += data || 0; if (data) console.log(`    ${data} no longer listed (${condition})`); }
       }
       await supabase.rpc("fn_record_crawl", { p_dealer_id: d.id, p_ok: !failed, p_error: failed ? (refusedWhy || "crawl failed") : null });
+    }
+
+    // THE DEALER-FEE CATALOGUE (20260925c_dealer_fee_catalog.sql): what this
+    // dealer states it charges, in its own words, and on how many of today's
+    // cars. Only a platform whose data carries the dealer's fee statement is
+    // counted as read for fees; the rest are our gap, not "no fees".
+    if (d.platform === "sm360" && !failed) {
+      const agg = feeRows(d.id, feeStatements, todayEdmonton());
+      totals.feeDealersRead++;
+      if (agg.length) totals.feeDealersPublished++;
+      if (DRY) { for (const r of agg.slice(0, 4)) console.log(`      fee: ${r.basis} ${r.fee_name} $${r.amount} on ${r.vehicles} car(s)`); }
+      else if (agg.length) {
+        const { error } = await supabase.from("dealer_fee_observation").upsert(agg, { onConflict: "dealer_id,observed_on,basis,fee_name,amount" });
+        if (error) console.warn(`    dealer fees not written: ${error.message}`);
+        else console.log(`    dealer fees: ${agg.length} published fee line(s) recorded`);
+      }
     }
 
     if (failed) totals.failed++;
@@ -755,6 +796,18 @@ upserted=${totals.upserted}
       : `${ok} dealer${ok === 1 ? "" : "s"} read, ${totals.rows.toLocaleString("en-CA")} cars on sale refreshed` +
         (ofTotal ? `; ${ofTotal.toLocaleString("en-CA")} Alberta dealer sites are catalogued, and the rest are on platforms we cannot read yet or refuse our crawler.` : ".");
     writeFileSync(process.env.CATALOG_STATUS_OUT, JSON.stringify({ state, rows_total: totals.rows, covered: ok, of_total: ofTotal, unit: "dealer sites", note }));
+    if (process.env.CATALOG_STATUS_FEES_OUT) {
+      // Dealer fees: a dealer counts once its fee statement was READ -- whether
+      // it publishes fees or states none. A dealer on a platform whose data
+      // carries no fee statement is our gap, so it does not count.
+      const fr = totals.feeDealersRead, fp = totals.feeDealersPublished;
+      writeFileSync(process.env.CATALOG_STATUS_FEES_OUT, JSON.stringify({
+        state: fr === 0 ? "red" : ofTotal && fr / ofTotal >= 0.9 ? "green" : "amber",
+        covered: fr, of_total: ofTotal, unit: "dealer sites",
+        note: fr === 0 ? "No dealer's own fee statement was read this run."
+          : `${fr} dealer${fr === 1 ? "'s" : "s'"} own fee statements read (${fp} publish fees on their listings); other dealers' listing data carries no fee statement we can read yet.`,
+      }));
+    }
   }
 
   if (totals.failed === totals.dealers && totals.dealers > 0) process.exit(1);
