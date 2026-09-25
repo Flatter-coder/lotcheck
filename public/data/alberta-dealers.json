@@ -1,17 +1,18 @@
 {
   "source": "OpenStreetMap (shop=car), via Overpass",
-  "generatedAt": "2026-09-24",
-  "totalDealers": 412,
+  "generatedAt": "2026-09-25",
+  "totalDealers": 413,
   "cities": [
     {
       "name": "Calgary",
-      "count": 141,
+      "count": 142,
       "sample": [
         "Royal Oak Audi",
         "Stadium Nissan",
         "Mercedes-Benz Downtown Calgary",
         "Jack Carter Chevrolet",
         "Stoney Trail Mazda",
+        "Auto House Sunridge",
         "Sunridge Mazda",
         "Sunridge Nissan",
         "Canyon Meadows Hyundai",
@@ -25,8 +26,7 @@
         "South Pointe Toyota",
         "Woodridge Ford",
         "Renfrew Chrysler Dodge Jeep Ram",
-        "Royal Oak Nissan",
-        "Charlesglen Toyota"
+        "Royal Oak Nissan"
       ]
     },
     {
