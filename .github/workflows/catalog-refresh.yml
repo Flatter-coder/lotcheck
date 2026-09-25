@@ -45,7 +45,10 @@ on:
     # guarantee: GitHub makes no delivery promise for scheduled workflows. If
     # the measured start does not move toward 11:23 within a week, the honest
     # next step is a real scheduler, not an earlier cron line to absorb the lag.
-    - cron: "23 11 * * *"
+    # TWICE DAILY (Vic 2026-09-25: every catalogue at 6am and midnight Calgary).
+    # 06 and 12 UTC are midnight and 6am MDT (an hour earlier in MST). GitHub
+    # starts these hours late, so the exact-time trigger is a separate step.
+    - cron: "23 6,12 * * *"
 jobs:
   refresh:
     runs-on: ubuntu-latest
