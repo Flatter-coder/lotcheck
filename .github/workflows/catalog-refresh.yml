@@ -431,3 +431,11 @@ jobs:
           # is a gap in what we built, and a permanently-red job is a job people
           # stop reading, which is the failure this whole report exists to end.
           exit "$rc"
+      # The daily report's check mark (20260925_catalog_status.sql). always():
+      # a failed refresh is recorded red, never left showing yesterday's green.
+      - name: Record catalogue status
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/record-catalog-status.mjs --catalog msrp --outcome ${{ job.status }} --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

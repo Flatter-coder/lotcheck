@@ -103,6 +103,17 @@
   tbody tr:hover{background:var(--panel-2)}
   .flag-row{color:var(--flag)}
 
+  /* catalogue status: three-state marks, drawn, never an emoji */
+  .cat-row{display:flex;align-items:flex-start;gap:9px;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px}
+  .cat-row:last-child{border-bottom:none}
+  .cat-row svg{flex:0 0 16px;margin-top:1px}
+  .cat-body{flex:1;min-width:0}
+  .cat-top{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .cat-name{font-weight:600;color:var(--ink)}
+  .cat-when{font-family:var(--mono);font-size:11px;color:var(--dimmer)}
+  .cat-note{font-size:11.5px;color:var(--dim);margin-top:2px;line-height:1.4}
+  .cat-tally{font-family:var(--mono);font-size:11px;color:var(--dim);float:right}
+
   .empty,.loading{padding:40px 0;text-align:center;color:var(--dim);font-size:14px}
   footer{margin-top:30px;padding-top:14px;border-top:1px solid var(--line);font-size:11px;color:var(--dimmer)}
 </style>
@@ -172,8 +183,14 @@
         lot. "Raw" is the count before that check. This is what LotCheck has
         read, on the days it read it — never a claim about the whole Alberta
         market, and it updates only on the days a crawl actually ran (the
-        crawl runs on demand today, pending a legal review of a standing
-        daily schedule).</div>
+        crawl runs nightly and reads only the dealers whose sites allow it
+        and whose platform we can read).</div>
+    </div>
+
+    <div class="panel" style="margin-top:16px">
+      <h2>Catalogues behind every report <span class="cat-tally" id="catTally"></span></h2>
+      <div class="sub">What a report reads when you paste a link or upload a quote. Each refreshes at 6am and midnight, Calgary time. Green: refreshed and complete. Amber: refreshed but partial, unverified or overdue. Red: failed, stale or not built yet.</div>
+      <div id="catRows"><div class="empty-row">Loading&hellip;</div></div>
     </div>
 
     <h2 class="section">History</h2>
@@ -328,13 +345,58 @@
     }).join("");
   }
 
+  // ── Catalogue status (fn_catalog_status). The job's own verdict, never
+  // upgraded here: a green that has not refreshed in 13 hours reads amber, and
+  // anything not refreshed in 26 hours, or never recorded, reads red.
+  var CATS = [
+    ["msrp", "MSRP, manufacturer prices"],
+    ["maker_vs_dealer", "Manufacturer vs Alberta dealer prices"],
+    ["price_compare", "Per-dealer price comparison"],
+    ["inventory", "New and used cars on sale in Alberta"],
+    ["apr_new", "APR, new vehicles (manufacturer rates)"],
+    ["apr_used", "APR, used vehicles"],
+    ["warranty", "Warranty"],
+    ["freight_pdi", "Freight & PDI"],
+    ["dealer_fees", "Dealer fees"]
+  ];
+  var esc = function(t){ return String(t == null ? "" : t).replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); };
+  function catMark(state){
+    var c = state === "green" ? "var(--good)" : state === "amber" ? "var(--flag)" : "var(--bad)";
+    var g = state === "green" ? '<path d="M4.6 8.4l2.3 2.3 4.6-4.9"/>' : state === "amber" ? '<path d="M8 4.6v4.1M8 11.2v.1"/>' : '<path d="M5.4 5.4l5.2 5.2M10.6 5.4l-5.2 5.2"/>';
+    return '<svg width="16" height="16" viewBox="0 0 16 16" role="img" aria-label="' + state + '"><circle cx="8" cy="8" r="7.1" fill="none" stroke="' + c + '" stroke-width="1.4"/>' +
+      '<g fill="none" stroke="' + c + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + g + '</g></svg>';
+  }
+  function renderCatalogues(list){
+    var by = {};
+    (Array.isArray(list) ? list : []).forEach(function(r){ by[r.catalog] = r; });
+    var now = Date.now(), greens = 0;
+    var html = CATS.map(function(c){
+      var r = by[c[0]], state = "red", note = "No refresh recorded yet.", when = "never", cov = "";
+      if (r){
+        state = r.state; note = r.note || "";
+        var age = (now - new Date(r.ran_at).getTime()) / 3600000;
+        if (age > 26){ state = "red"; note = "Not refreshed in " + Math.floor(age / 24) + " day" + (Math.floor(age / 24) === 1 ? "" : "s") + ". " + note; }
+        else if (age > 13 && state === "green"){ state = "amber"; note = "Overdue: last refreshed " + Math.round(age) + " hours ago. " + note; }
+        when = new Date(r.ran_at).toLocaleString("en-CA", { timeZone: "America/Edmonton", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+        if (r.covered != null && r.of_total) cov = fmt(r.covered) + " of " + fmt(r.of_total) + (r.unit ? " " + r.unit : "") + " · ";
+      }
+      if (state === "green") greens++;
+      return '<div class="cat-row">' + catMark(state) + '<div class="cat-body"><div class="cat-top"><span class="cat-name">' + esc(c[1]) + '</span>' +
+        '<span class="cat-when">' + esc(when) + '</span></div><div class="cat-note">' + esc(cov) + esc(note) + '</div></div></div>';
+    }).join("");
+    document.getElementById("catRows").innerHTML = html;
+    document.getElementById("catTally").textContent = greens + " of " + CATS.length + " green";
+  }
+
   Promise.all([
     rpc("fn_alberta_inventory_daily", { p_days: 30 }).catch(function(e){ console.error(e); return null; }),
     rpc("fn_city_inventory_daily", { p_days: 3 }).catch(function(e){ console.error(e); return []; }),
     rpc("fn_city_price_index", {}).catch(function(e){ console.error(e); return []; }),
     rpc("fn_recent_listing_events", { p_limit: 60 }).catch(function(e){ console.error(e); return []; }),
+    rpc("fn_catalog_status", {}).catch(function(e){ console.error(e); return null; }),
   ]).then(function(results){
     var daily = results[0], cityInventory = results[1], priceIndex = results[2], events = results[3];
+    renderCatalogues(results[4]);
     if (daily === null){
       document.getElementById("loading").textContent = "Could not load today's report — try again shortly.";
       return;

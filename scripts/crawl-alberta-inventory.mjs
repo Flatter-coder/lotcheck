@@ -41,7 +41,7 @@ import { partitionByScope } from "./lib/crawl-blocklist.mjs";
 import { politeFetch, requestLedger } from "./lib/polite-fetch.mjs";
 import { extractConvertusVmsRoot } from "../supabase/functions/_shared/convertus-vms.js";
 import { pathToFileURL } from "node:url";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 
 const DRY = process.argv.includes("--dry-run");
 const HOST_ARG = (() => { const i = process.argv.indexOf("--host"); return i > -1 ? process.argv[i + 1] : null; })();
@@ -738,6 +738,23 @@ async function main() {
 upserted=${totals.upserted}
 `);
     console.log(`   step output: wrote=${wrote} (${totals.upserted} observation row(s) accepted)`);
+  }
+
+  // THE DAILY REPORT'S CHECK MARK for this catalogue (20260925_catalog_status.sql,
+  // recorded by scripts/record-catalog-status.mjs). "Every car on sale in
+  // Alberta" is the target, so coverage is measured against every dealer site
+  // we have catalogued, not against the few we can read -- 31 of 31 would be a
+  // green that hides 1,600 dealers. [[three-state-check-marks]]
+  if (process.env.CATALOG_STATUS_OUT && !DRY && supabase) {
+    const ok = totals.dealers - totals.failed;
+    const { count } = await supabase.from("dealer_source").select("id", { count: "exact", head: true });
+    const ofTotal = Number(count) || null;
+    const state = !(totals.upserted > 0) ? "red" : ofTotal && ok / ofTotal >= 0.9 ? "green" : "amber";
+    const note = !(totals.upserted > 0)
+      ? "The crawl wrote no observations, so no car on sale was refreshed."
+      : `${ok} dealer${ok === 1 ? "" : "s"} read, ${totals.rows.toLocaleString("en-CA")} cars on sale refreshed` +
+        (ofTotal ? `; ${ofTotal.toLocaleString("en-CA")} Alberta dealer sites are catalogued, and the rest are on platforms we cannot read yet or refuse our crawler.` : ".");
+    writeFileSync(process.env.CATALOG_STATUS_OUT, JSON.stringify({ state, rows_total: totals.rows, covered: ok, of_total: ofTotal, unit: "dealer sites", note }));
   }
 
   if (totals.failed === totals.dealers && totals.dealers > 0) process.exit(1);

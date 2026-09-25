@@ -99,6 +99,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           DRY_INPUT: ${{ inputs.dry_run }}
           HOST_INPUT: ${{ inputs.host }}
+          CATALOG_STATUS_OUT: ${{ runner.temp }}/inventory-status.json
         run: |
           ARGS=""
           if [ "$EVENT" = "schedule" ]; then
@@ -120,6 +121,7 @@ jobs:
       # steps.crawl.outputs.wrote is written by the crawler itself, and is true
       # only when fn_upsert_listings accepted at least one observation row.
       - name: Rebuild city price index
+        id: index
         if: ${{ steps.crawl.outputs.wrote == 'true' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -150,3 +152,18 @@ jobs:
         run: |
           echo "::error title=Crawl wrote nothing::Not a dry run, and fn_upsert_listings accepted 0 observation rows. The city index and the public daily count were both skipped. Read the Crawl step for the per-dealer reason."
           exit 1
+      # The daily report's check mark (20260925_catalog_status.sql). always():
+      # a failed refresh is recorded red, never left showing yesterday's green.
+      - name: Record catalogue status
+        if: ${{ always() && steps.crawl.outputs.dry == 'false' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/record-catalog-status.mjs --catalog inventory --outcome ${{ steps.crawl.outcome }} --summary "${{ runner.temp }}/inventory-status.json" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      # The per-dealer price comparison is rebuilt only after a crawl wrote.
+      - name: Record catalogue status (price comparison)
+        if: ${{ always() && steps.crawl.outputs.dry == 'false' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/record-catalog-status.mjs --catalog price_compare --outcome ${{ steps.index.outcome }} --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

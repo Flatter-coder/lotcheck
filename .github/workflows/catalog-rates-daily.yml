@@ -52,3 +52,23 @@ jobs:
       - name: ${{ matrix.name }} rates
         continue-on-error: true
         run: node scripts/${{ matrix.script }}
+
+  # The daily report's check mark (20260925_catalog_status.sql). Each make's
+  # leg above is continue-on-error, so a green job result cannot say every
+  # make refreshed -- recorded AMBER with that reason until the legs are tallied.
+  record-status:
+    needs: rates
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Record catalogue status
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          echo '{"state":"amber","unit":"makes","covered":null,"of_total":17,"note":"Maker finance rates were re-read for 17 makes; each make is allowed to fail on its own, and which ones did is not tallied yet."}' > "$RUNNER_TEMP/apr.json"
+          node scripts/record-catalog-status.mjs --catalog apr_new --outcome ${{ needs.rates.result }} --summary "$RUNNER_TEMP/apr.json" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
