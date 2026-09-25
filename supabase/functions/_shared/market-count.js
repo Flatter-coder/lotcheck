@@ -398,7 +398,11 @@ export function likeForLikePool(rows, ctx = {}) {
     for (const [scope, set] of ladder) {
       if (set.length >= minRows) {
         const [yf, yt] = yearsOf(set, span);
-        return { ...out, rows: set, read: yr, scope, insufficient: false, nRead: yr.length, yearFrom: yf, yearTo: yt };
+        // The report's shortlist page prints what the mileage window left
+        // out, so the same scope and years are asked again without it.
+        const inScope = (r) => scope === "model" || (scope === "trim" ? fullTrimKey(dropModelWords(r.trim, model)) === exactKey : normTrim(dropModelWords(r.trim, model)) === family);
+        const outKm = kmHalf == null ? [] : compatible.filter((r) => Number(r.year) >= y - span && Number(r.year) <= y + span && !inKm(r) && inScope(r));
+        return { ...out, rows: set, read: yr, scope, insufficient: false, nRead: yr.length, yearFrom: yf, yearTo: yt, outKm, otherTrims: yr.length - set.length };
       }
     }
   }

@@ -300,6 +300,9 @@ function normMv(x) {
     make: x.mk || null, model: x.md || null, province: x.pv || null, seenMin: x.from || null, seenMax: x.to || null,
     nKept: x.nk ?? null, reason: x.rs || null,
     sample: Array.isArray(x.rows) ? x.rows.map((r) => ({ price: r.p ?? null, km: r.k ?? null, year: r.y ?? null, trim: r.t || null, city: r.c || null, dealer: r.d || null, asOf: r.s || null })) : null,
+    pool: Array.isArray(x.pool) ? x.pool.map((r) => ({ price: r.p ?? null, km: r.k ?? null, year: r.y ?? null, trim: r.t || null, city: r.c || null, dealer: r.d || null, asOf: r.s || null, out: r.x || null })) : null,
+    otherTrims: x.ot ?? null,
+    outKm: x.okm ?? null,
   };
 }
 
