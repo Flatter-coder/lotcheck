@@ -140,8 +140,11 @@ console.log("\nthe emailed report");
   check("tenPoints() never truncates its own list",
     !/return P\.slice\(0,\s*10\)/.test(body),
     "slice(0,10) silently drops any point beyond the tenth instead of failing loudly");
-  check("the PDF's audit kicker counts the CORE, not the mixed pool",
-    /kicker\(`\$\{CORE\.length\}-POINT AUDIT`\)/.test(src));
+  // The 4-page PDF (2026-09-25) draws its points from reportCards(), whose
+  // first ten ARE reportBands() -- the core -- followed by the numbered
+  // cards 11-13 (test:report-cards pins that). Extras are never among them.
+  check("the PDF's point cards come from reportCards(), the core ten first",
+    /const cards = reportCards\(a\);/.test(src));
   // The emailed HTML body is a THIRD render path, and it used to build its own
   // conditional roll-up instead of using tenPoints(): every row was an
   // `if (...) push` with no else, so an unresolved point emitted nothing --
@@ -156,7 +159,7 @@ console.log("\nthe emailed report");
     !/deck\.push\(\{ label: "Quick checks"/.test(src),
     "that roll-up is what silently dropped unresolved points");
   check("the PDF prints the additional checks under their own heading",
-    /kicker\(`ALSO CHECKED ON THIS LISTING \(\$\{EXTRA\.length\}\)`\)/.test(src),
+    /section\(`ALSO CHECKED ON THIS LISTING \(\$\{EXTRA\.length\}\)`/.test(src),
     "every extra must still be printed — just not as a point");
 }
 

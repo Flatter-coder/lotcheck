@@ -193,11 +193,16 @@ for (const s of MUST_NOT_CATCH) {
 // Removing the subtraction is not enough: the bar and the prose must ASK.
 const pdf = readFileSync(new URL("../supabase/functions/email-quote-report/index.ts", import.meta.url), "utf8");
 check("the PDF imports the claim gate", /import \{[^}]*qualifyMsrpClaim/.test(pdf));
-check("the page-1 range bar gates on the claim", /barClaim\.comparable/.test(pdf),
-  "the bar must not draw when the two figures are not comparable");
-check("the range bar rails against the claim's OWN reference",
-  /xFor\(barRef\)/.test(pdf),
-  "marks drawn against ms while the number comes from the claim would disagree with each other");
+// The 4-page PDF (2026-09-25) replaced the range bar with the page-1 fibre
+// gauge and the page-3 shortlist; both take their MSRP line from the gate.
+check("the page-1 gauge draws an MSRP line only when the claim is comparable",
+  /claim\.comparable && Number\(claim\.reference\) > 0 \? Number\(claim\.reference\) : null/.test(pdf),
+  "the line must not draw when the two figures are not comparable");
+check("the gauge's +/- tag is measured from that same reference",
+  /const d = ask - ref, dl =/.test(pdf),
+  "a tag measured from ms while the line comes from the claim would disagree with each other");
+check("the shortlist's MSRP step asks the gate too",
+  /const msrpRef = isNewCar && claimP\.comparable && Number\(claimP\.reference\) > 0/.test(pdf));
 check("the 'Price vs MSRP' prose gates on the claim",
   /exact && claim\.comparable/.test(pdf));
 // Anchored on the EXACT-but-not-comparable branch, not on "claim.refusal"

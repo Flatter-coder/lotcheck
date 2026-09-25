@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-09-24a";  // 24a: the Hub & Spoke redesign -- page 1 is thirteen cards around the car, page 2 the summary and thank-you; the full detail follows unchanged.
+const PDF_BUILDER_VER = "2026-09-25b";  // 25b: the 4-page report replaces the old detail pages -- 1 cards, 2 compare (sealed listings, market line), 3 shortlist (sealed pool, by city), 4 summary + thank-you + disclosures, 5 details (fee breakdown, recalls, extras, insurance, AMVIC, payment default); a finance-tied price leads page 1. 24a: the Hub & Spoke redesign -- page 1 is thirteen cards around the car, page 2 the summary and thank-you; the full detail follows unchanged.
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -1481,6 +1481,47 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
       heroImg = null;
     }
   }
+  // Pre-embed the sealed capture BEFORE the footer text so the footer can only
+  // promise pages that will actually exist (embed failures, oversize captures,
+  // and PNG pixel bombs all resolve to capImg = null here, never mid-promise).
+  let capImg: any = null;
+  if (sealedShot && sealedShot.b64.length <= SHOT_PDF_EMBED_CAP) {
+    try {
+      if (sealedShot.ext === "png") {
+        const px = pngPixelCount(sealedShot.bytes);
+        if (px !== null && px <= PNG_PIXEL_BUDGET) capImg = await doc.embedPng(sealedShot.bytes);
+        else console.warn(`Capture PDF embed skipped: PNG pixel count ${px} over budget.`);
+      } else {
+        capImg = await doc.embedJpg(sealedShot.bytes);
+      }
+    } catch (e) { console.warn("Capture embed skipped:", (e as Error)?.message); capImg = null; }
+  }
+  // Page geometry hoisted ABOVE the footer text: a capture can embed fine yet
+  // slice to zero pages (extreme wide-thin aspect), and the footer may only
+  // promise pages that will actually render.
+  // 13 PAGES, AND DERIVED AT THE NARROWEST CAPTURE, NOT THE WIDEST.
+  //
+  // Raising what we CAPTURE without raising what we PRINT is half a two-step:
+  // the bigger captures would simply be truncated on paper instead. But the
+  // page count cannot be derived at 1920, because capScaledH above scales by
+  // the CAPTURE's own width -- so a NARROWER source image prints TALLER, and
+  // the narrow ones are exactly what the refit ladder produces on the tall
+  // pages that need the pages most. Deriving at 1920 would repeat, one
+  // constant over, the mistake this whole change is about.
+  //
+  // So derive at CAPTURE_MIN_WIDTH = 1024, the narrowest the ladder can emit.
+  // The tallest capture on record here is a 17,729 px capitalchev.ca page:
+  // scaledH = 17,729 * (483.28 / 1024) = 8,367 pt, and 1 + ceil((8367 -
+  // 629.89) / 695.89) = 13 pages. At 1920 the same page needs 7. Thirteen is
+  // the ceiling, not the typical count -- an ordinary 5,900 px listing prints
+  // in 4 -- and the image is embedded ONCE and drawn per page, so extra pages
+  // cost drawing instructions, not megabytes. capture.test.ts hand-copies
+  // these constants and test:capture-whole-page fails if the copy drifts.
+  const CAP_HEAD_FIRST = 100, CAP_HEAD_REST = 34, CAP_MAXP = 13;
+  const capScaledH = capImg ? capImg.height * (W / capImg.width) : 0;
+  const capU0 = PH - M * 2 - CAP_HEAD_FIRST, capUR = PH - M * 2 - CAP_HEAD_REST;
+  const capPages = capImg ? capturePageCount(capScaledH, capU0, capUR, CAP_MAXP) : 0;
+
   {
     const cards = reportCards(a);
     const tally = cardTally(cards);
@@ -1707,7 +1748,15 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     const idLine = [a.vinCheck?.vin ? "VIN " + a.vinCheck.vin : null, cond.toUpperCase(), a.odometerKm != null && Number.isFinite(Number(a.odometerKm)) ? Number(a.odometerKm).toLocaleString("en-CA") + " KM" : null, a.dealerCity || null].filter(Boolean).join("  -  ");
     TR(idLine, PW - HM, hdr - 19, fit(idLine, sans, 6.5, CW * 0.44), sans, FAINT);
 
-    const gTop = hdr - 38, colW = 150, gap = 10, sideW = (CW - colW - gap * 2) / 2;
+    // A price tied to the dealer's financing is not the price: it leads page 1.
+    const fcx = !!(a.financeContingent && a.financeContingent.contingent);
+    if (fcx) {
+      rpath(HM, hdr - 29, CW, 15, 3, { color: LTBG.raise, borderColor: LT.raise, borderWidth: 0.7 });
+      glyph("raise", HM + 10, hdr - 36.5, 3.4, LT.raise, WHITE);
+      const fcT = "PRICE DEPENDS ON FINANCING WITH THE DEALER  -  pay cash or use your own bank and the price can change. Details on page 5.";
+      TX(fcT, HM + 19, hdr - 38.8, fit(fcT, sansB, 6.4, CW - 26), sansB, LT.raise);
+    }
+    const gTop = hdr - 38 - (fcx ? 19 : 0), colW = 150, gap = 10, sideW = (CW - colW - gap * 2) / 2;
     const bottomRowH = 84, stripH = 18, gBottom = 42 + stripH + 8 + bottomRowH + 8;
     const cardH = (gTop - gBottom - 4 * 7) / 5;
     const L = cards.slice(0, 5), Rr = cards.slice(5, 10);
@@ -1814,8 +1863,380 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
       TX(lab, tx0 + 10, sy - 11.5, 7.2, sansB, LT[st]);
       tx0 += 10 + wSafe(sansB, lab, 7.2) + 16;
     }
-    TR("SUMMARY NEXT PAGE  -  FULL DETAIL AFTER IT", PW - HM - 10, sy - 11.5, 6.2, sansB, BLUE);
+    TR("COMPARE P.2  -  SHORTLIST P.3  -  SUMMARY P.4  -  DETAILS P.5", PW - HM - 10, sy - 11.5, 6.2, sansB, BLUE);
     drawFooter();
+
+    {
+    // ── PAGES 2 + 3: COMPARE, THEN SHORTLIST ─────────────────────────────
+    // Vic 09-24: "have dedicated page just to compare", then the elimination
+    // page (same car -> price -> km or MSRP -> days on lot, by city). Every row
+    // is a SEALED listing (canonical v15 rows, v16 pool) -- never a second read
+    // at PDF time -- and the sentence box is marketCompareLine(), the author
+    // card 01 already reads. [[two-authors-per-fact]] [[elimination-sum-up-page]]
+    const mvP: any = a.marketValue || {};
+    const mcP = marketCompareLine(a);
+    const askP = Number(a.quotedPrice) > 0 ? Number(a.quotedPrice) : null;
+    const kmP = !isNewCar && Number(a.odometerKm) > 0 ? Number(a.odometerKm) : null;
+    const kmS = (v: any) => (Number(v) > 0 ? Math.round(Number(v)).toLocaleString("en-CA") + " km" : "km not stated");
+    const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const dShort = (s: any) => { const m = String(s || "").match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? MON[Number(m[2]) - 1] + " " + Number(m[3]) : "-"; };
+    const ymm = [mvP.make || a.make, mvP.model || a.model].filter(Boolean).join(" ");
+    const yrs = mvP.yearFrom && mvP.yearTo ? (mvP.yearFrom === mvP.yearTo ? String(mvP.yearFrom) : `${mvP.yearFrom}-${mvP.yearTo}`) : "";
+    const kept: any[] = (Array.isArray(mvP.sample) ? mvP.sample : []).filter((r: any) => Number(r?.price) > 0).sort((p: any, q: any) => p.price - q.price);
+    const dol = Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days) : null;
+    const nm = (r: any) => (r?.dealer ? String(r.dealer) : "Dealer not named");
+    const nD = Number(mvP.dealers) > 0 ? Number(mvP.dealers) : null;
+    const kickRow = (l: string, r: string, yy: number) => {
+      TX(l, HM, yy, fit(l, sansB, 7, CW * 0.6), sansB, BLUE);
+      if (r) TR(r, PW - HM, yy, fit(r, sansB, 6.4, CW * 0.38), sansB, FAINT);
+    };
+    // The page-2 verdict is the MARKET line's own light, on a new car too
+    // (card 01 measures a new car against MSRP; this page against dealers).
+    const stP = mcP.state !== "confirmed" ? "unchecked" : mcP.light === "red" ? "raise" : mcP.light === "green" ? "clear" : "noted";
+    const midP = Number(mvP.average) > 0 ? Number(mvP.average) : null;
+
+    page = doc.addPage([PW, PH]); paper();
+    let py = drawHeader() - 14;
+    kickRow(`COMPARE  -  ${vehTitle.toUpperCase()}`, kept.length ? `${kept.length} LISTING${kept.length === 1 ? "" : "S"}${nD ? `  -  ${nD} DEALER${nD === 1 ? "" : "S"}` : ""}  -  ALBERTA-WIDE` : "", py);
+    py -= 19;
+    TX(mcP.title, HM, py, fit(mcP.title, serifB, 15, CW), serifB, NAVY);
+    py -= 14;
+
+    // The sentence, in the market line's own words, and its verdict.
+    const bw = CW - 158, vw = bw - 132;
+    const linesP: any[] = (mcP.lines || []).length ? mcP.lines : [{ k: "Comparison", v: mcP.body || "No comparison set was read for this report." }];
+    const rowsL = linesP.map((l: any) => ({ k: wrap(String(l.k || "").toUpperCase(), sansB, 6, 104), v: wrap(String(l.v || ""), sans, 7.4, vw) }));
+    const bh = Math.max(78, 14 + rowsL.reduce((s: number, r: any) => s + Math.max(r.v.length * 9.6, r.k.length * 8) + 6, 0));
+    rpath(HM, py, bw, bh, 6, { color: WHITE, borderColor: HAIR, borderWidth: 0.8 });
+    page.drawRectangle({ x: HM, y: py - bh + 5, width: 3, height: bh - 10, color: LT[stP] });
+    let ly = py - 16;
+    for (const r of rowsL) {
+      r.k.forEach((t: string, i: number) => TX(t, HM + 14, ly - i * 8, 6, sansB, SOFT));
+      r.v.forEach((t: string, i: number) => TX(t, HM + 124, ly - i * 9.6, 7.4, sans, INK));
+      ly -= Math.max(r.v.length * 9.6, r.k.length * 8) + 6;
+    }
+    const vx0 = HM + bw + 10, vbw = CW - bw - 10;
+    rpath(vx0, py, vbw, bh, 6, { color: LTBG[stP], borderColor: LT[stP], borderWidth: 0.9 });
+    glyph(stP, vx0 + 16, py - 16, 4, LT[stP], WHITE);
+    TX(WORDS[stP], vx0 + 25, py - 18.5, 7, sansB, LT[stP]);
+    const dP = askP && midP && mcP.state === "confirmed" ? askP - midP : null;
+    const bigP = dP != null ? (dP > 0 ? "+" : dP < 0 ? "-" : "") + fmtMoney(Math.abs(dP)) : String(mcP.value || "NOT COMPARED");
+    TX(bigP, vx0 + 12, py - 42, fit(bigP, serifB, 18, vbw - 24), serifB, LT[stP]);
+    clamp(String(mcP.lightLabel || mcP.headline || ""), sans, 6.6, vbw - 24, 3).forEach((t: string, i: number) => TX(t, vx0 + 12, py - 55 - i * 8.4, 6.6, sans, INK));
+    py -= bh + 10;
+
+    if (kept.length) {
+      // The chart: every strand one sealed listing, height its price, position
+      // its odometer (a new car's are spread evenly -- all read near zero).
+      const chH = 280, chT = py;
+      rpath(HM, chT, CW, chH, 8, { color: NAVY });
+      for (let i = 0; i < 24; i++) page.drawRectangle({ x: HM + 1, y: chT - chH + 1 + i * 2.2, width: CW - 2, height: 2.3, color: rgb(0.114, 0.243, 0.471), opacity: 0.5 * (1 - i / 24) });
+      const pL = HM + 44, pR = PW - HM - 70, pT = chT - 30, pB = chT - chH + 30;
+      const pv = [...kept.map((r: any) => Number(r.price)), askP, midP].filter((v: any) => Number(v) > 0) as number[];
+      let lo = Math.min(...pv), hi = Math.max(...pv);
+      const padv = (hi - lo) * 0.1 || hi * 0.05; lo -= padv; hi += padv;
+      const Yp = (v: number) => pB + ((v - lo) / (hi - lo || 1)) * (pT - pB);
+      const byKm = !isNewCar && kmP != null && kept.every((r: any) => Number(r.km) > 0);
+      const kv = byKm ? [...kept.map((r: any) => Number(r.km)), kmP as number] : [];
+      const kLo = byKm ? Math.min(...kv) * 0.92 : 0, kHi = byKm ? Math.max(...kv) * 1.05 : 1;
+      const order = kept.map((r: any, i: number) => i);
+      const Xk = (r: any, i: number) => byKm ? pL + ((Number(r.km) - kLo) / (kHi - kLo || 1)) * (pR - pL) : pL + ((i + 0.5) / (kept.length + 1)) * (pR - pL);
+      const step = [500, 1000, 2000, 2500, 5000, 10000, 20000].find((s) => (hi - lo) / s <= 5) || 20000;
+      for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+        page.drawLine({ start: { x: pL, y: Yp(v) }, end: { x: PW - HM - 12, y: Yp(v) }, thickness: 0.4, color: rgb(0.204, 0.290, 0.451) });
+        TR("$" + (v >= 1000 ? (v / 1000).toLocaleString("en-CA", { maximumFractionDigits: 1 }) + "k" : String(v)), pL - 6, Yp(v) - 2, 5.8, mono, MUTE);
+      }
+      if (byKm) {
+        const ks = [5000, 10000, 20000, 25000, 50000].find((s) => (kHi - kLo) / s <= 7) || 50000;
+        for (let k = Math.ceil(kLo / ks) * ks; k <= kHi; k += ks) {
+          const x = pL + ((k - kLo) / (kHi - kLo)) * (pR - pL);
+          TC(`${Math.round(k / 1000)}k km`, x, chT - chH + 12, 5.6, mono, MUTE);
+        }
+      }
+      const legend = `HEIGHT = ASKING PRICE${byKm ? "  -  POSITION = ODOMETER" : ""}${Number(mvP.low) > 0 && Number(mvP.high) > 0 ? `  -  SHADED = RANGE OF THE ${kept.length}` : ""}`;
+      TR(legend, PW - HM - 12, chT - 14, 5.4, sansB, MUTE);
+      if (Number(mvP.low) > 0 && Number(mvP.high) > Number(mvP.low)) {
+        page.drawRectangle({ x: pL, y: Yp(Number(mvP.low)), width: PW - HM - 12 - pL, height: Yp(Number(mvP.high)) - Yp(Number(mvP.low)), color: BLUE, opacity: 0.12 });
+      }
+      if (midP) {
+        page.drawLine({ start: { x: pL, y: Yp(midP) }, end: { x: PW - HM - 12, y: Yp(midP) }, thickness: 1, color: DK.clear });
+        rpath(PW - HM - 66, Yp(midP) + 12, 56, 22, 3, { color: rgb(0.039, 0.165, 0.133), borderColor: DK.clear, borderWidth: 0.6 });
+        TC(`MIDDLE OF THE ${kept.length}`, PW - HM - 38, Yp(midP) + 4, fit(`MIDDLE OF THE ${kept.length}`, sansB, 4.8, 52), sansB, DK.clear);
+        TC(fmtMoney(midP), PW - HM - 38, Yp(midP) - 5, 6.6, monoB, WHITE);
+      }
+      const boxes: [number, number, number, number][] = [];
+      const hit = (x: number, y0: number, w: number, h: number) => boxes.some(([bx, by, bw2, bh2]) => x < bx + bw2 && x + w > bx && y0 < by + bh2 && y0 + h > by);
+      kept.forEach((r: any, i: number) => {
+        const x = Xk(r, order[i]), yv = Yp(Number(r.price));
+        page.drawLine({ start: { x, y: pB - 8 }, end: { x, y: yv }, thickness: 0.7, color: rgb(0.745, 0.890, 1), opacity: 0.8 });
+        page.drawCircle({ x, y: yv, size: 4, color: CYAN, opacity: 0.25 });
+        page.drawCircle({ x, y: yv, size: 2, color: WHITE, borderColor: CYAN, borderWidth: 0.8 });
+        const l1 = fmtMoney(Number(r.price)), l2 = [r.year, r.city].filter(Boolean).join(" - ");
+        const lw = Math.max(wSafe(monoB, l1, 6.6), wSafe(sans, l2, 5.2)) + 2;
+        const cands: [number, number][] = [[x + 5, yv + 1], [x - 5 - lw, yv + 1], [x + 5, yv - 17], [x - 5 - lw, yv - 17], [x + 5, yv + 12]];
+        const [lx, lyy] = cands.find(([cx, cy2]) => cx > pL && cx + lw < PW - HM - 12 && !hit(cx, cy2 - 7, lw, 15)) || cands[0];
+        boxes.push([lx, lyy - 7, lw, 15]);
+        TX(l1, lx, lyy + 1, 6.6, monoB, WHITE);
+        TX(l2, lx, lyy - 6, 5.2, sans, MUTE);
+      });
+      if (askP) {
+        const x = byKm ? pL + (((kmP as number) - kLo) / (kHi - kLo)) * (pR - pL) : pL + ((kept.length + 0.5) / (kept.length + 1)) * (pR - pL);
+        const yv = Yp(askP), col = DK[stP === "unchecked" ? "noted" : stP];
+        page.drawLine({ start: { x, y: pB - 8 }, end: { x, y: yv }, thickness: 1.6, color: col });
+        page.drawCircle({ x, y: yv, size: 6, color: col, opacity: 0.3 });
+        page.drawCircle({ x, y: yv, size: 2.8, color: WHITE, borderColor: col, borderWidth: 1 });
+        const t1 = `THIS CAR${kmP ? "  -  " + kmS(kmP) : ""}`, t2 = fmtMoney(askP) + (dP != null ? `  ${dP >= 0 ? "+" : "-"}${fmtMoney(Math.abs(dP))}` : "");
+        const tw = Math.max(wSafe(sansB, t1, 5), wSafe(monoB, t2, 7.2)) + 14;
+        const tx = Math.min(Math.max(x - tw / 2, pL), PW - HM - 14 - tw), ty = Math.min(yv + 30, chT - 20);
+        rpath(tx, ty, tw, 23, 3, { color: rgb(0.180, 0.059, 0.047), borderColor: col, borderWidth: 0.8 });
+        TX(t1, tx + 7, ty - 8, 5, sansB, col);
+        TX(t2, tx + 7, ty - 18, 7.2, monoB, WHITE);
+      }
+      py = chT - chH - 12;
+
+      // The named table: the same sealed rows, cheapest first.
+      const C = { yt: HM + 6, odo: HM + 158, ask: HM + 212, vs: HM + 286, days: HM + 326, dealer: HM + 358, city: HM + 462, read: PW - HM - 6 };
+      const hdrY = py;
+      const H = (s: string, x: number, al: "l" | "r" | "c") => (al === "l" ? TX : al === "r" ? TR : TC)(s, x, hdrY, 5.6, sansB, FAINT);
+      H("YEAR - TRIM", C.yt, "l"); H("ODOMETER", C.odo, "r"); H("ASKING", C.ask, "r"); H("VS THIS CAR", C.vs, "r");
+      H("DAYS ON LOT", C.days, "c"); H("DEALER", C.dealer, "l"); H("CITY", C.city, "l"); H("READ", C.read, "r");
+      page.drawLine({ start: { x: HM, y: hdrY - 5 }, end: { x: PW - HM, y: hdrY - 5 }, thickness: 0.6, color: HAIR });
+      const rh = 17;
+      let ry = hdrY - 5;
+      const midIdx = kept.length % 2 ? (kept.length - 1) / 2 : -1;
+      const row = (cells: any, tint: any, bar: any) => {
+        if (tint) page.drawRectangle({ x: HM, y: ry - rh, width: CW, height: rh, color: tint });
+        if (bar) page.drawRectangle({ x: HM, y: ry - rh, width: 2.5, height: rh, color: bar });
+        const by = ry - rh + 5;
+        TX(cells.yt, C.yt, by, 7, sansB, INK);
+        if (cells.tag) TX(cells.tag[0], C.yt + wSafe(sansB, cells.yt, 7) + 5, by + 0.5, 5, sansB, cells.tag[1]);
+        TR(cells.odo, C.odo, by, 6.8, mono, INK); TR(cells.ask, C.ask, by, 6.8, monoB, INK);
+        TR(cells.vs[0], C.vs, by, 6.8, monoB, cells.vs[1]);
+        TC(cells.days[0], C.days, by, 5.8, sans, cells.days[1]);
+        TX(cells.dealer, C.dealer, by, fit(cells.dealer, sansB, 6.8, C.city - C.dealer - 6), sansB, INK);
+        TX(cells.city, C.city, by, fit(cells.city, sans, 6.8, C.read - C.city - 28), sans, SOFT);
+        TR(cells.read, C.read, by, 6.8, mono, SOFT);
+        ry -= rh;
+        page.drawLine({ start: { x: HM, y: ry }, end: { x: PW - HM, y: ry }, thickness: 0.4, color: HAIR });
+      };
+      kept.forEach((r: any, i: number) => {
+        const d = askP ? askP - Number(r.price) : null;
+        row({
+          yt: `${r.year || ""} ${r.trim || ""}`.trim() || "-", tag: i === midIdx ? ["MIDDLE", LT.clear] : null,
+          odo: kmS(r.km), ask: fmtMoney(Number(r.price)),
+          vs: d == null ? ["-", SOFT] : d > 0 ? [`${fmtMoney(d)} less`, LT.clear] : d < 0 ? [`${fmtMoney(-d)} more`, LT.raise] : ["same", SOFT],
+          days: ["not stated", FAINT], dealer: nm(r), city: r.city || "-", read: dShort(r.asOf),
+        }, i === midIdx ? LTBG.clear : null, i === midIdx ? LT.clear : null);
+      });
+      row({
+        yt: `${a.year || ""} ${a.trim || ""}`.trim() || vehTitle, tag: ["THIS CAR", LT[stP === "unchecked" ? "noted" : stP]],
+        odo: kmP ? kmS(kmP) : isNewCar ? "new" : "km not stated", ask: askP ? fmtMoney(askP) : "not shown",
+        vs: ["THIS CAR", LT[stP === "unchecked" ? "noted" : stP]], days: [dol ? String(dol) : "not stated", dol ? INK : FAINT],
+        dealer: a.dealerName || "This dealer", city: a.dealerCity || "-", read: dShort(a.issuedAt || new Date().toISOString()),
+      }, LTBG[stP], LT[stP]);
+      py = ry - 12;
+    } else {
+      // Nothing sealed to draw: say what the market line says, in its words.
+      const nh = 96;
+      rpath(HM, py, CW, nh, 8, { color: PANEL2, borderColor: HAIR, borderWidth: 0.7 });
+      hatch(HM + 1, py - 1, CW - 2, nh - 2, HAIR, 9);
+      TC(String(mcP.headline || "Not compared"), PW / 2, py - 36, 12, serifB, NAVY);
+      clamp(String(mcP.body || ""), sans, 7.4, CW - 80, 3).forEach((t: string, i: number) => TC(t, PW / 2, py - 52 - i * 10, 7.4, sans, SOFT));
+      py -= nh + 12;
+    }
+
+    // Two notes: what was left out, and why days on lot mostly says "not stated".
+    const ot = Number(mvP.otherTrims) || 0, okm = Number(mvP.outKm) || 0;
+    const outPr = Math.max(0, (Number(mvP.nRead) || 0) - (Number(mvP.comps) || 0));
+    const poolArr: any[] = Array.isArray(mvP.pool) ? mvP.pool : [];
+    const kmList = poolArr.filter((r: any) => r.out === "km").slice(0, 4).map((r: any) => kmS(r.km));
+    const parts = [
+      ot ? `${ot} ${ot === 1 ? "was another trim" : "were other trims"}` : "",
+      okm ? `${okm} sat outside this car's mileage range${kmList.length ? ` (${kmList.join(", ")}${okm > kmList.length ? ", ..." : ""})` : ""}` : "",
+      kept.length && outPr ? `${outPr} ${outPr === 1 ? "was a price outlier" : "were price outliers"}` : "",
+    ].filter(Boolean);
+    const leftTxt = !kept.length ? "No similar listings were compared, so nothing was left out."
+      : mvP.pool == null ? `Only the ${kept.length} listings compared were sealed with this report.`
+      : parts.length ? `Besides the ${kept.length} compared, other ${yrs} ${ymm} listings read in Alberta were left out: ${parts.join("; ")}. A car two dealers both list is counted once.`
+      : `Every like-for-like ${ymm} listing read in Alberta is compared above. A car two dealers both list is counted once.`;
+    const dayTxt = `Shown only where a dealer's own inventory feed states it. This car: ${dol ? `${dol} days${a.daysOnLot?.since ? `, listed since ${fmtDateEn(a.daysOnLot.since)}` : ""}` : "not stated"}.` +
+      (kept.length ? ` We hold it for none of the ${kept.length} compared listings, so each is marked "not stated" rather than estimated.` : "");
+    const nw = (CW - 10) / 2;
+    const nlL = clamp(leftTxt, sans, 6.6, nw - 20, 5), nlR = clamp(dayTxt, sans, 6.6, nw - 20, 5);
+    const nh2 = 24 + Math.max(nlL.length, nlR.length) * 8.6;
+    ([[`LEFT OUT${kept.length ? ` OF THE ${kept.length + ot + okm + outPr}` : ""}`, nlL, HM], ["DAYS ON LOT", nlR, HM + nw + 10]] as [string, string[], number][]).forEach(([t, ls, x]) => {
+      rpath(x, py, nw, nh2, 6, { color: WHITE, borderColor: HAIR, borderWidth: 0.8 });
+      TX(t, x + 10, py - 13, 6, sansB, SOFT);
+      ls.forEach((ln, i) => TX(ln, x + 10, py - 24 - i * 8.6, 6.6, sans, INK));
+    });
+    drawFooter();
+
+    // ── PAGE 3: SHORTLIST ──────────────────────────────────────────────
+    page = doc.addPage([PW, PH]); paper();
+    let sy = drawHeader() - 14;
+    const poolRows: any[] = (poolArr.length ? poolArr : kept.map((r: any) => ({ ...r, out: null }))).filter((r: any) => Number(r?.price) > 0);
+    const claimP = qualifyMsrpClaim(a);
+    const msrpRef = isNewCar && claimP.comparable && Number(claimP.reference) > 0 ? Number(claimP.reference) : null;
+    const judged = poolRows.map((r: any) => {
+      const s1 = r.out ? "fail" : "pass";
+      const s2 = s1 !== "pass" ? "skip" : askP ? (Number(r.price) < askP ? "pass" : "fail") : "none";
+      const s3 = s2 === "fail" || s2 === "skip" ? "skip" : isNewCar ? (msrpRef ? (Number(r.price) <= msrpRef ? "pass" : "fail") : "none") : (kmP && Number(r.km) > 0 ? (Number(r.km) < kmP ? "pass" : "fail") : "none");
+      const s4 = s3 === "fail" || s3 === "skip" ? "skip" : "none";
+      return { r, s: [s1, s2, s3, s4], alive: s1 === "pass" && s2 !== "fail" && s3 !== "fail" };
+    });
+    const alive = judged.filter((j: any) => j.alive).sort((p: any, q: any) => p.r.price - q.r.price);
+    alive.forEach((j: any, i: number) => { j.rank = i + 1; });
+    const n1 = judged.filter((j: any) => j.s[0] === "pass").length, n2 = judged.filter((j: any) => j.s[0] === "pass" && j.s[1] !== "fail").length;
+    const cityOf = (c: any) => String(c || "City not stated");
+    const cityN = new Map<string, number>();
+    judged.forEach((j: any) => cityN.set(cityOf(j.r.city), (cityN.get(cityOf(j.r.city)) || 0) + 1));
+    const home = cityOf(a.dealerCity);
+    const cities = [...cityN.entries()].sort((p, q) => (q[0] === home ? 1 : 0) - (p[0] === home ? 1 : 0) || q[1] - p[1]).map(([c]) => c);
+    if (!cities.includes(home)) cities.unshift(home);
+    const cityLine = cities.filter((c) => cityN.get(c)).map((c) => `${c.toUpperCase()} ${cityN.get(c)}`).join("  -  ");
+    kickRow(`SHORTLIST  -  ${vehTitle.toUpperCase()}  -  ${cond.toUpperCase()}`, poolRows.length ? `${poolRows.length} LISTINGS  -  ${cityLine}` : "", sy);
+    sy -= 19;
+    TX("Every similar one for sale in Alberta, narrowed down", HM, sy, fit("Every similar one for sale in Alberta, narrowed down", serifB, 15, CW), serifB, NAVY);
+    sy -= 12;
+
+    if (poolRows.length) {
+      const X = { name: HM + 10, s: [HM + 130, HM + 226, HM + 330, HM + 424], rank: PW - HM - 14 };
+      const stepT = ["1. SAME CAR", "2. PRICE VS YOURS", isNewCar ? "3. VS MSRP" : "3. ODOMETER", "4. DAYS ON LOT"];
+      const stepS = [
+        `${[yrs, mvP.trimLabel || "all trims"].filter(Boolean).join(" - ")}${mvP.kmLow != null && mvP.kmHigh != null ? ` - ${Math.round(Number(mvP.kmLow)).toLocaleString("en-CA")}-${kmS(mvP.kmHigh)}` : ""} - ${n1} left`,
+        askP ? `under ${fmtMoney(askP)} - ${n2} left` : "no asking price shown",
+        isNewCar ? (msrpRef ? `at or under ${fmtMoney(msrpRef)} - ${alive.length} left` : "no MSRP compared") : (kmP ? `fewer than ${kmS(kmP)} - ${alive.length} left` : "odometer not read"),
+        "where the dealer states it",
+      ];
+      const nRowsT = judged.length + 1 + cities.length;
+      const reserve = 262;  // sum-up, verdict, method note, footer
+      const headH = 40;
+      const rh = Math.max(11.5, Math.min(20, (sy - reserve - headH - 10) / nRowsT));
+      const panH = headH + nRowsT * rh + 10;
+      rpath(HM, sy, CW, panH, 8, { color: NAVY });
+      TX(`${poolRows.length} ${mvP.trimLabel ? String(mvP.trimLabel).toUpperCase() + " " : ""}LISTINGS READ`, X.name, sy - 30, 5.6, sansB, MUTE);
+      stepT.forEach((t, i) => {
+        TX(t, X.s[i], sy - 13, 6.4, sansB, WHITE);
+        clamp(stepS[i], mono, 5.2, (X.s[i + 1] || X.rank - 20) - X.s[i] - 8, 2).forEach((ln: string, k: number) => TX(ln, X.s[i], sy - 22 - k * 6.6, 5.2, mono, MUTE));
+      });
+      TR("RANK", X.rank + 4, sy - 30, 5.6, sansB, MUTE);
+      let ry = sy - headH;
+      const cellW = (i: number) => (X.s[i + 1] || X.rank - 16) - X.s[i] - 14;
+      const mark = (st: string, x: number, yc: number) => {
+        if (st === "pass") { page.drawCircle({ x, y: yc, size: 3.4, color: CYAN, opacity: 0.35 }); page.drawCircle({ x, y: yc, size: 2.2, color: WHITE }); }
+        else if (st === "fail") { page.drawCircle({ x, y: yc, size: 3.2, borderColor: DK.raise, borderWidth: 0.9 }); page.drawLine({ start: { x: x - 2.2, y: yc + 2.2 }, end: { x: x + 2.2, y: yc - 2.2 }, thickness: 0.9, color: DK.raise }); }
+        else if (st === "none") page.drawCircle({ x, y: yc, size: 2.2, color: rgb(0.353, 0.408, 0.518) });
+      };
+      const cellText = (j: any, i: number): [string, any] => {
+        const r = j.r, st = j.s[i];
+        if (st === "skip") return ["", MUTE];
+        if (i === 0) return st === "pass" ? [`${r.year || ""} ${r.trim || ""}`.trim(), WHITE] : r.out === "km" ? [kmS(r.km), DK.raise] : [`${fmtMoney(Number(r.price))} price outlier`, DK.raise];
+        if (i === 1) return askP ? [`${fmtMoney(Number(r.price))}  ${Number(r.price) < askP ? "-" : "+"}${fmtMoney(Math.abs(askP - Number(r.price)))}`, st === "fail" ? DK.raise : WHITE] : [fmtMoney(Number(r.price)), WHITE];
+        if (i === 2) return isNewCar ? (msrpRef ? [`vs ${fmtMoney(msrpRef)}`, st === "fail" ? DK.raise : WHITE] : ["not compared", MUTE]) : [kmS(r.km), st === "fail" ? DK.raise : WHITE];
+        return ["not stated", MUTE];
+      };
+      const subjRow = () => {
+        page.drawRectangle({ x: HM + 1, y: ry - rh, width: CW - 2, height: rh, color: rgb(0.290, 0.078, 0.071) });
+        const yc = ry - rh / 2;
+        TX("This dealer", X.name, yc - 0.5, 6.6, sansB, WHITE);
+        TX("YOUR QUOTE", X.name, yc - 7, 4.8, sansB, DK.raise);
+        TX(`${a.year || ""} ${a.trim || ""}`.trim(), X.s[0], yc - 2.3, 6.2, monoB, WHITE);
+        if (askP) TX(fmtMoney(askP), X.s[1], yc - 2.3, 6.2, monoB, WHITE);
+        TX(isNewCar ? (msrpRef ? `MSRP ${fmtMoney(msrpRef)}` : "") : kmP ? kmS(kmP) : "", X.s[2], yc - 2.3, 6.2, monoB, WHITE);
+        TX(dol ? `${dol} days` : "not stated", X.s[3], yc - 2.3, 6.2, monoB, dol ? WHITE : MUTE);
+        ry -= rh;
+      };
+      for (const c of cities) {
+        const js = judged.filter((j: any) => cityOf(j.r.city) === c);
+        if (!js.length && c !== home) continue;
+        TX(`${c.toUpperCase()}  -  ${js.length}`, X.name, ry - rh + 4.5, 5.8, sansB, CYAN);
+        ry -= rh;
+        js.sort((p: any, q: any) => (p.s[0] === "pass" ? 0 : 1) - (q.s[0] === "pass" ? 0 : 1) || p.r.price - q.r.price);
+        for (const j of js) {
+          const yc = ry - rh / 2;
+          TX(nm(j.r), X.name, yc - 2.3, fit(nm(j.r), sansB, 6.6, X.s[0] - X.name - 8), sansB, j.alive ? WHITE : MUTE);
+          j.s.forEach((st: string, i: number) => {
+            if (st === "skip") { page.drawLine({ start: { x: X.s[i], y: yc }, end: { x: X.s[i] + cellW(i), y: yc }, thickness: 0.5, color: rgb(0.204, 0.290, 0.451), dashArray: [2, 2] }); return; }
+            mark(st, X.s[i] + 3, yc);
+            const [t, col] = cellText(j, i);
+            if (t) TX(t, X.s[i] + 10, yc - 2.2, fit(t, mono, 6.2, cellW(i)), mono, col);
+          });
+          if (j.rank) {
+            const top = j.rank === 1;
+            page.drawCircle({ x: X.rank, y: yc, size: 5.4, color: top ? DK.clear : NAVY, borderColor: top ? DK.clear : WHITE, borderWidth: 0.8 });
+            TC(String(j.rank), X.rank, yc - 2.2, 6.2, sansB, top ? NAVY : WHITE);
+          } else TC("out", X.rank, yc - 2, 5.6, sans, rgb(0.451, 0.502, 0.600));
+          ry -= rh;
+          page.drawLine({ start: { x: HM + 8, y: ry }, end: { x: PW - HM - 8, y: ry }, thickness: 0.3, color: rgb(0.137, 0.212, 0.353) });
+        }
+        if (c === home) subjRow();
+      }
+      sy -= panH + 14;
+
+      // The sum-up: the survivors, cheapest first.
+      TX("THE SUM-UP", HM, sy, 7, sansB, BLUE);
+      const fewer = isNewCar ? (msrpRef ? " at or under MSRP" : "") : kmP ? " with fewer km" : "";
+      TR(`ranked by price  -  ${alive.length} of ${poolRows.length} ask less${fewer}`, PW - HM, sy, 6.4, sans, FAINT);
+      sy -= 8;
+      const oh = 76;
+      if (alive.length) {
+        const ow = (CW - 16) / 3;
+        alive.slice(0, 3).forEach((j: any, i: number) => {
+          const r = j.r, x = HM + i * (ow + 8);
+          rpath(x, sy, ow, oh, 6, i === 0 ? { color: LTBG.clear, borderColor: LT.clear, borderWidth: 1 } : { color: WHITE, borderColor: HAIR, borderWidth: 0.8 });
+          TX(`OPTION ${i + 1}${i === 0 ? "  -  LOWEST PRICE" : ""}`, x + 9, sy - 12, 5.6, sansB, i === 0 ? LT.clear : SOFT);
+          if (r.city) TR(String(r.city), x + ow - 9, sy - 12, 5.8, sans, SOFT);
+          TX(nm(r), x + 9, sy - 25, fit(nm(r), serifB, 9.5, ow - 18), serifB, NAVY);
+          TX(fmtMoney(Number(r.price)), x + 9, sy - 42, 14, serifB, NAVY);
+          TX(`${r.year || ""} ${r.trim || ""}${r.km ? "  -  " + kmS(r.km) : ""}`.trim(), x + 9, sy - 52, fit(`${r.year || ""} ${r.trim || ""}  -  ${kmS(r.km)}`, sans, 6.4, ow - 18), sans, SOFT);
+          if (askP) {
+            const l1 = `${fmtMoney(askP - Number(r.price))} less than your quote`;
+            const l2 = kmP && Number(r.km) > 0 ? `  -  ${Math.round(kmP - Number(r.km)).toLocaleString("en-CA")} km fewer` : "";
+            TX(l1, x + 9, sy - 61, fit(l1 + l2, sansB, 6.2, ow - 18), sansB, LT.clear);
+            if (l2) TX(l2, x + 9 + wSafe(sansB, l1, fit(l1 + l2, sansB, 6.2, ow - 18)), sy - 61, fit(l1 + l2, sansB, 6.2, ow - 18), sans, SOFT);
+          }
+          TX(`read from the dealer's page ${dShort(r.asOf)}`, x + 9, sy - 70, 5.8, sans, FAINT);
+        });
+      } else {
+        rpath(HM, sy, CW, 40, 6, { color: WHITE, borderColor: HAIR, borderWidth: 0.8 });
+        TX(`None of the ${n1} similar listings asks less${fewer}.`, HM + 12, sy - 24, 8.5, serifB, NAVY);
+      }
+      sy -= (alive.length ? oh : 40) + 10;
+
+      // The verdict, as a suggestion -- never a claim about the dealer.
+      const vSt = alive.length ? "raise" : "noted";
+      const best = alive[0]?.r;
+      const quote = `Your quote: ${askP ? fmtMoney(askP) : "no asking price shown"} for a ${[a.year, a.trim].filter(Boolean).join(" ") || vehTitle}${kmP ? ` with ${kmS(kmP)}` : ""}${dol ? `, listed ${dol} days` : ""}.`;
+      const vTxt = alive.length
+        ? `${quote} ${alive.length} similar ${ymm} ${alive.length === 1 ? "listing asks" : "listings ask"} less${fewer}; the lowest is ${nm(best)}${best.city ? ", " + best.city : ""} at ${fmtMoney(Number(best.price))}. A suggestion: bring this page and ask what separates this car from ${alive.length === 1 ? "that one" : `these ${alive.length}`}.`
+        : `${quote} None of the ${n1} similar listings compared asks less${fewer}. Nothing to raise from this page.`;
+      const vl = clamp(vTxt, sans, 7.2, CW - 110, 4);
+      const vh = Math.max(40, 16 + vl.length * 9.4);
+      rpath(HM, sy, CW, vh, 6, { color: LTBG[vSt], borderColor: LT[vSt], borderWidth: 0.9 });
+      glyph(vSt, HM + 16, sy - vh / 2, 4, LT[vSt], WHITE);
+      TX(WORDS[vSt], HM + 25, sy - vh / 2 - 2.5, 7, sansB, LT[vSt]);
+      vl.forEach((ln: string, i: number) => TX(ln, HM + 92, sy - 15 - i * 9.4, 7.2, sans, INK));
+      sy -= vh + 10;
+
+      const how = `Every ${cond} ${yrs} ${ymm}${mvP.trimLabel ? " " + mvP.trimLabel : ""} that Alberta dealers advertised on their own pages` +
+        (mvP.seenMin && mvP.seenMax ? `, read between ${fmtDateEn(mvP.seenMin)} and ${fmtDateEn(mvP.seenMax)}` : "") +
+        (ot ? ` (${ot} other ${ot === 1 ? "trim" : "trims"} left out before check 1)` : "") +
+        `. A car two dealers both list is counted once.` +
+        (poolRows.length < n1 + okm + outPr ? ` The first ${poolRows.length} are shown.` : "") +
+        ` Days on lot is shown only where a dealer's own inventory feed states it; we hold it for none of these, so it did not narrow anything.`;
+      const LEAD = "How this was narrowed.";
+      const hl = wrap(LEAD + " " + how, sans, 6.4, CW - 6);
+      TX(LEAD, HM, sy - 6, 6.4, sansB, INK);
+      hl.slice(0, 4).forEach((ln: string, i: number) => (i === 0 ? TX(ln.slice(LEAD.length + 1), HM + wSafe(sansB, LEAD + " ", 6.4), sy - 6, 6.4, sans, SOFT) : TX(ln, HM, sy - 6 - i * 8.4, 6.4, sans, SOFT)));
+    } else {
+      const nh = 110;
+      rpath(HM, sy, CW, nh, 8, { color: PANEL2, borderColor: HAIR, borderWidth: 0.7 });
+      hatch(HM + 1, sy - 1, CW - 2, nh - 2, HAIR, 9);
+      TC("Not enough similar listings to narrow down", PW / 2, sy - 40, 12, serifB, NAVY);
+      clamp(String(mcP.body || "No comparison set was read for this report."), sans, 7.4, CW - 80, 3).forEach((t: string, i: number) => TC(t, PW / 2, sy - 56 - i * 10, 7.4, sans, SOFT));
+    }
+    drawFooter();
+    }
 
     // ── SUMMARY + THANK YOU ────────────────────────────────────────────────
     page = doc.addPage([PW, PH]); paper();
@@ -1923,1103 +2344,148 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     page.drawLine({ start: { x: HM + 16, y: tyTop - tyH + 30 }, end: { x: PW - HM - 16, y: tyTop - tyH + 30 }, thickness: 0.5, color: rgb(0.25, 0.33, 0.52) });
     TX("Proudly built in Calgary.", HM + 16, tyTop - tyH + 18, 7, sansB, WHITE);
     TX("Thank you for supporting a local startup. Every check helps grow good jobs right here in Alberta.", HM + 16 + wSafe(sansB, "Proudly built in Calgary. ", 7), tyTop - tyH + 18, 7, sans, MUTE);
+    // The disclosures the old detail section closed on, kept word for word:
+    // tamper-evidence, how it was read (incl. AI), and what it does not cover.
+    // [[defamation-proof-and-compliant]] [[make-it-dispute-proof]]
+    const colophonText = "Analyzed once, never stored on our end. This report's ID is a fingerprint of its own contents" + (issued ? " issued " + issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + " - change any figure and the ID changes, so it is tamper-evident. " + (verifyUrl ? "Use the link in your email to verify it at lotcheck.ca/verify - it recomputes the fingerprint and checks the signature, and nothing is stored on our end. " : "Verify it anytime at lotcheck.ca/verify using the link in this email. ") + (capImg && capPages > 0 ? "The sealed listing capture is printed on the pages that follow and attached as its own photo file. " : sealedShot ? "The sealed listing capture is attached to your email as its own photo file. " : "") + "Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google. Vehicle, price, and fee details were read from the dealer's page by an automated system, including AI reading the page or a screenshot when it couldn't be parsed directly - verify them against the original listing before you rely on them. LotCheck reviews the deal, not the car's history - pair it with a vehicle-history report before you buy.";
+    wrap(colophonText, sans, 6, CW).slice(0, 7).forEach((ln: string, i: number) => TX(ln, HM, 44 + 7 * 7.6 - i * 7.6, 6, sans, FAINT));
     drawFooter();
 
-    // The full detail follows on a fresh page, exactly as before.
-    page = doc.addPage([PW, PH]); paper(); y = PH - M;
-  }
+    // ── PAGE 5: DETAILS ────────────────────────────────────────────────
+    // Vic 09-25: the old detail pages are replaced by the 4-page design, and
+    // what only they carried moves here, in the new style: the dealer's own
+    // breakdown, every recall, the extras, the market count, older years,
+    // insurance, AMVIC, the payment default. Same shared line builders as
+    // /verify and the email, so the words cannot drift. [[two-authors-per-fact]]
+    {
+      // No line may assume the buyer signs. [[no-assume-the-client-signs]]
+      const unsign = (s: unknown) => noEmDash(s).replace(/\bBefore you sign\b/g, "Before you commit").replace(/\bbefore you sign\b/g, "before you commit").replace(/\bbefore signing\b/gi, "before committing").replace(/\bBEFORE SIGNING\b/g, "BEFORE COMMITTING");
+      const KW = 128, VX = HM + KW, VW = CW - KW;
+      let dy = 0;
+      const newPage = (first: boolean) => {
+        page = doc.addPage([PW, PH]); paper();
+        dy = drawHeader() - 14;
+        TX(`DETAILS  -  ${vehTitle.toUpperCase()}`, HM, dy, fit(`DETAILS  -  ${vehTitle.toUpperCase()}`, sansB, 7, CW), sansB, BLUE);
+        dy -= 19;
+        if (first) { TX("Everything else we read on this listing", HM, dy, 15, serifB, NAVY); dy -= 18; }
+      };
+      const room = (h: number) => { if (dy - h < 52) { drawFooter(); newPage(false); } };
+      // One section: a kicker, a headline, key/value rows, then plain text.
+      const section = (kick: string, head: string, headCol: any, rows: { k: string; v: string; vf?: any; vc?: any }[], body?: string, note?: string) => {
+        const hl = head ? wrap(unsign(head), serifB, 9.5, CW) : [];
+        const rl = rows.map((r) => ({ k: wrap(unsign(r.k).toUpperCase(), sansB, 5.8, KW - 10), v: wrap(unsign(r.v), r.vf || sans, 7.2, VW), vf: r.vf, vc: r.vc }));
+        const bl = body ? wrap(unsign(body), sans, 7, CW) : [];
+        const nl2 = note ? wrap(unsign(note), serifI, 6.6, CW) : [];
+        const h = 14 + hl.length * 12 + rl.reduce((s, r) => s + Math.max(r.k.length * 7.5, r.v.length * 9.2) + 3, 0) + bl.length * 9 + nl2.length * 8.4 + 12;
+        room(Math.min(h, 300));
+        TX(unsign(kick).toUpperCase(), HM, dy, 6.4, sansB, BLUE);
+        dy -= 13;
+        hl.forEach((ln) => { TX(ln, HM, dy, 9.5, serifB, headCol || NAVY); dy -= 12; });
+        for (const r of rl) {
+          room(Math.max(r.k.length * 7.5, r.v.length * 9.2) + 3);
+          r.k.forEach((ln, i) => TX(ln, HM, dy - i * 7.5, 5.8, sansB, FAINT));
+          r.v.forEach((ln, i) => TX(ln, VX, dy - i * 9.2, 7.2, r.vf || sans, r.vc || INK));
+          dy -= Math.max(r.k.length * 7.5, r.v.length * 9.2) + 3;
+        }
+        bl.forEach((ln) => { room(9); TX(ln, HM, dy, 7, sans, SOFT); dy -= 9; });
+        nl2.forEach((ln) => { room(8.4); TX(ln, HM, dy, 6.6, serifI, SOFT); dy -= 8.4; });
+        dy -= 4;
+        page.drawLine({ start: { x: HM, y: dy }, end: { x: PW - HM, y: dy }, thickness: 0.6, color: HAIR });
+        dy -= 12;
+      };
+      const linesOf = (l: any) => (Array.isArray(l?.lines) ? l.lines : []).map((x: any) => ({ k: String(x.k || ""), v: String(x.v || "") }));
+      newPage(true);
 
-  drawLogo(M, y + 2, 38);
-  T("LOTCHECK", { size: 15, font: serifB, color: INK, x: M + 48 });
-  // Measure the widest header line and seat the check badge clear to its left
-  // (same measured-not-guessed positioning the old seal used, see git history
-  // for the "letters are shining" incident this pattern was built to avoid).
-  const HDR_TITLE = "QUOTE CHECK REPORT", HDR_NO = "No. " + RID;
-  const hdrW = Math.max(wSafe(sansB, HDR_TITLE, 8.5), wSafe(mono, HDR_NO, 8.5));
-  const BADGE_S = 8, BADGE_GAP = 10;
-  // No "VERIFIED" label here -- that word already means something else on
-  // this page (priceVerified / "STATUS - VERIFIED QUOTE" below is about the
-  // PRICE, not the document). The checkmark alone signals report authenticity;
-  // the Dispute-proof section spells out what it means in prose.
-  drawCheckBadge(M + W - hdrW - BADGE_GAP - BADGE_S, y - 9, BADGE_S);
-  right(HDR_TITLE, { size: 8.5, font: sansB, color: SOFT });
-  y -= 20;
-  // The mockup sets the report number in TEAL mono as the masthead's one
-  // accent; FAINT made the report's own identifier the quietest thing on it.
-  right(HDR_NO, { size: 8.5, font: mono, color: TEAL });
-  y -= 2;
-  // 1.4pt of near-white was a rule the mockup draws as a 1px hairline in
-  // --line. Two heavy near-white rules stacked under the masthead (this one
-  // and the dek rule below) were the loudest marks on page 1.
-  page.drawLine({ start: { x: M, y }, end: { x: M + W, y }, thickness: 0.7, color: HAIR });
-  y -= 22;
-
-  // ---- HEADLINE ----
-  // THE CAR, BESIDE ITS OWN NAME.
-  //
-  // A buyer reads this PDF with the dealer's listing open in another tab, and
-  // until now nothing on page 1 let them confirm at a glance that the two are
-  // the same car -- the sealed capture proves it, but it is pages away and it
-  // is a screenshot of a web page, not a picture of a vehicle.
-  //
-  // The photograph is the dealer's own, published in their listing's
-  // schema.org markup, on the node that also carries this VIN. It is drawn to
-  // FIT its box, never cropped and never stretched: a crop would be us
-  // choosing which part of their photograph to show, and a stretch would
-  // misrepresent the car's proportions. The caption names whose picture it is.
-  //
-  // WHEN THERE IS NO PHOTO the box says so in words. Measured on the 41 real
-  // captured pages we hold, 23 publish one (56%) -- so this is the common
-  // case, not an edge case, and it must never render as an empty rectangle a
-  // reader has to interpret. [[report-never-empty]]
-  // [[present-without-creating-questions]]
-  // 4:3, because that is what the listings actually serve: both CDNs in the
-  // captured corpus (content.homenetiol.com at 640x480, autoscout24 at
-  // 1600x1200) publish 1.333, so the box holds them with no letterbox bars.
-  // The fit-scale below still handles anything else without cropping.
-  const PHOTO_W = 150, PHOTO_H = 112.5, PHOTO_GAP = 16, PHOTO_CAP = 13;
-  let photoImg: any = null;
-  if (vehiclePhoto) {
-    try {
-      photoImg = heroImg || (vehiclePhoto.kind === "png"
-        ? await doc.embedPng(vehiclePhoto.bytes)
-        : await doc.embedJpg(vehiclePhoto.bytes));
-    } catch (e) {
-      // Bytes that passed the magic-byte check can still be a malformed or
-      // progressive JPEG pdf-lib declines. The report is not worth a picture.
-      console.warn("Vehicle photo embed failed:", (e as Error)?.message);
-      photoImg = null;
-    }
-  }
-  // Captured BEFORE the status line moves y, so the photo's top edge is fixed
-  // whatever the headline does below it. Nothing here can break the page (y is
-  // at the top of page 1 and need() cannot fire), so the box and the text are
-  // guaranteed to be on the same page.
-  const photoTop = y - 2;
-  const photoX = M + W - PHOTO_W;
-  T(priceVerified ? "STATUS  -  VERIFIED QUOTE" : "STATUS  -  PRICE READ ONCE", { size: 8.5, font: sansB, color: priceVerified ? TEAL : CORAL });
-  y -= 20;
-  // The headline gives up the photo's width and gap. Everything else on this
-  // band keeps the full measure.
-  const headW = W - PHOTO_W - PHOTO_GAP;
-  const headline = a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || "Your Quote";
-  for (const ln of wrap(headline, serifB, 26, headW)) { need(30); T(ln, { size: 26, font: serifB, color: INK }); y -= 30; }
-  y -= 2;
-  const dek = [a.dealerName, a.dealerCity].filter(Boolean).join(", ");
-  // Wrapped, not just narrowed: T() does not measure, and a long dealer name
-  // ("Lexus of Royal Oak Calgary, Calgary") would have run under the photo.
-  if (dek) { for (const ln of wrap(dek + "   -   " + reportDate, serifI, 10.5, headW)) { T(ln, { size: 10.5, font: serifI, color: SOFT }); y -= 15; } y -= 3; }
-
-  if (photoImg) {
-    rrect(photoX, photoTop, PHOTO_W, PHOTO_H, 6, { color: PANEL2, borderColor: HAIR, borderWidth: 0.7 });
-    const sc = Math.min((PHOTO_W - 2) / photoImg.width, (PHOTO_H - 2) / photoImg.height);
-    const dw = photoImg.width * sc, dh = photoImg.height * sc;
-    page.drawImage(photoImg, {
-      x: photoX + (PHOTO_W - dw) / 2,
-      y: photoTop - PHOTO_H + (PHOTO_H - dh) / 2,
-      width: dw, height: dh,
-    });
-    // Whose photograph this is, said plainly. [[make-it-dispute-proof]]
-    center("The dealer's own listing photo", photoTop - PHOTO_H - 9, { cx: photoX + PHOTO_W / 2, size: 7.5, font: serifI, color: FAINT });
-  } else {
-    rrect(photoX, photoTop, PHOTO_W, PHOTO_H, 6, { color: TRACK, borderColor: HAIR, borderWidth: 0.7 });
-    center("NO PHOTO PUBLISHED", photoTop - PHOTO_H / 2 + 3, { cx: photoX + PHOTO_W / 2, size: 8, font: sansB, color: FAINT });
-    center("in this listing's own page data", photoTop - PHOTO_H / 2 - 9, { cx: photoX + PHOTO_W / 2, size: 8, font: sans, color: FAINT });
-  }
-  // Whichever column is longer sets the rule. A one-line headline used to leave
-  // the photo hanging past it; taking the lower of the two can never collide.
-  y = Math.min(y, photoTop - PHOTO_H - PHOTO_CAP);
-  rule(HAIR, 0.7, 6);
-
-  // ---- THE DEAL ----
-  advance(4);
-  const colW = W / 2, figTop = y;
-  Tat("ASKING PRICE", figTop - 9, { size: 8, font: sansB, color: FAINT });
-  Tat(qp ? money(qp) : "Not shown", figTop - 34, { size: 25, font: monoB, color: INK });
-  Tat("before tax & fees", figTop - 48, { size: 8, font: sans, color: FAINT });
-  const rx = M + colW + 14;
-  // "CATALOG MSRP" was printed over figures that came from the DEALER, which
-  // both overstates their provenance and contradicts the email wrapping this
-  // PDF. The label follows the basis now, from the one shared rule.
-  const pdfClaim = qualifyMsrpClaim(a);
-  Tat(msrpExact ? "MSRP (VERIFIED)" : pdfClaim.label.toUpperCase(), figTop - 9, { x: rx, size: 8, font: sansB, color: FAINT });
-  if (ms) {
-    Tat(money(ms), figTop - 34, { x: rx, size: 25, font: monoB, color: msrpExact ? TEAL : SOFT });
-    Tat(msrpExact ? "manufacturer suggested" : "reference figure - not the sticker", figTop - 48, { x: rx, size: 8, font: sans, color: FAINT });
-  } else {
-    // This printed a bare "-" at 25pt whenever no MSRP of any basis was found:
-    // the largest dead character on page 1, sitting under a caption that
-    // described a "reference figure" which was not there. Reported live
-    // 2026-09-10 (report LC-01EE-2B7, a used 2024 Toyota Land Cruiser 1958 --
-    // Vic: "what report miss MSRP").
-    //
-    // A sticker we do not hold is a fact to state, not a blank to leave. The
-    // slot says so in words and hands the reader the one move that actually
-    // gets them the number; the paragraph below already explains why no
-    // over/under-MSRP claim is made. No figure is invented here -- a used
-    // 2024's original sticker is not in our catalogue, and guessing it would
-    // put a fabricated denominator under the whole price comparison.
-    // [[report-never-empty]] [[no-llm-generated-valuation-numbers]]
-    // [[present-without-creating-questions]] [[msrp-100-percent-accuracy]]
-    Tat("Not published", figTop - 32, { x: rx, size: 15, font: sansB, color: SOFT });
-    Tat("ask for the original window sticker", figTop - 48, { x: rx, size: 8, font: sans, color: FAINT });
-  }
-  page.drawLine({ start: { x: M + colW, y: figTop - 6 }, end: { x: M + colW, y: figTop - 50 }, thickness: 0.7, color: HAIR });
-  y = figTop - 58;
-  // ---- MSRP RANGE BAR (concept #7, "price-terrain-chart") ----
-  // The honest half of #7's terrain chart: a real MSRP mark and a real
-  // asking-price mark on one shared scale, the gap between them shaded and
-  // quantified. What #7's mockup drew as a continuous bezier "ridge line"
-  // between the two points was decorative, not data -- nothing else on this
-  // listing backs a curve, so only the two real marks and the real gap are
-  // drawn. [[no-llm-generated-valuation-numbers]] [[design-must-be-self-explanatory]]
-  //
-  // THE BAR IS A CLAIM, SO IT ASKS THE GATE. It used to draw on `delta &&
-  // msrpBasis === "exact"` with delta = qp - ms. An exact trim match means we
-  // found the right row; it says nothing about whether the two figures are
-  // measured the same way. In AB/ON/BC/QC the advertised price is all-in by
-  // law while half the catalogue is ex-freight or records no basis, so this bar
-  // printed "+$3,164 OVER MSRP" on a car nobody had marked up -- about $3,000
-  // of it Toyota's own freight and Alberta's own levies, which sit INSIDE an
-  // advertised price by law. The on-screen report refused that same comparison
-  // while the PDF drew it, and the PDF is the artifact that gets forwarded to
-  // the dealer. qualifyMsrpClaim picks the right reference (all-in against
-  // all-in), checks the basis, and owns the delta.
-  const barClaim = qualifyMsrpClaim(a);
-  const barDelta = barClaim.comparable ? barClaim.delta : null;
-  const barRef = Number(barClaim.reference) || 0;
-  if (barDelta !== null && barDelta !== 0 && barRef > 0 && a.msrpBasis === "exact") {
-    need(58);
-    const barH = 10, barY = y - 4;
-    // Rail against the figure the delta was actually measured against, not the
-    // ex-freight MSRP -- otherwise the marks and the number disagree.
-    const lo = Math.min(qp, barRef), hi = Math.max(qp, barRef);
-    const pad = Math.max((hi - lo) * 0.2, 60);
-    const lo2 = lo - pad, hi2 = hi + pad, span = (hi2 - lo2) || 1;
-    const xFor = (v: number) => M + ((v - lo2) / span) * W;
-    // The shaded gap between the MSRP mark and the asking mark was a cream-theme
-    // tint (#FAECE6 / #E7F4F1) left behind when the palette went dark, so the
-    // one figure page 1 exists to show sat inside a near-WHITE bar on a dark
-    // page -- the same defect as the white days-on-lot card, on the report's
-    // most important visual. It takes a dark tint of its own accent now, the
-    // same pair the tone chips use.
-    // The gap fill has to separate from the RAIL it sits inside, not just from
-    // the page: the first light build used the same ~0.9-luminance tint as the
-    // rail and the shaded gap disappeared. This is a stronger tint of the same
-    // accent, chosen to read against RAIL rather than against white.
-    const over = barDelta > 0, gapColor = over ? CORAL : TEAL,
-          gapBg = over ? rgb(0.953, 0.769, 0.690) : rgb(0.655, 0.871, 0.839);
-    page.drawRectangle({ x: M, y: barY - barH, width: W, height: barH, color: RAIL });
-    const xMsrp = xFor(barRef), xAsk = xFor(qp);
-    const gx0 = Math.min(xMsrp, xAsk), gx1 = Math.max(xMsrp, xAsk);
-    page.drawRectangle({ x: gx0, y: barY - barH, width: Math.max(gx1 - gx0, 1), height: barH, color: gapBg });
-    page.drawLine({ start: { x: xMsrp, y: barY + 5 }, end: { x: xMsrp, y: barY - barH - 5 }, thickness: 1.6, color: INK });
-    page.drawCircle({ x: xMsrp, y: barY - barH / 2, size: 3, color: INK });
-    page.drawLine({ start: { x: xAsk, y: barY + 5 }, end: { x: xAsk, y: barY - barH - 5 }, thickness: 2.2, color: gapColor });
-    page.drawCircle({ x: xAsk, y: barY - barH / 2, size: 3.6, color: gapColor });
-    y = barY - barH - 16;
-    const label = (over ? "+" : "-") + money(Math.abs(barDelta)) + (over ? " OVER MSRP" : " UNDER MSRP");
-    const pct = barRef ? ` -- ${Math.abs(barDelta / barRef * 100).toFixed(1)}%` : "";
-    T(label + pct, { size: 12.5, font: sansB, color: gapColor });
-    if (!priceVerified) { const wl = wSafe(sansB, label + pct, 12.5); Tat("(vs catalog MSRP - listing price not yet verified)", y - 12, { x: M + wl + 8, size: 8.5, font: sans, color: FAINT }); }
-    y -= 24;
-  }
-  // "What this means" -- the printed twin of the on-screen explanation, and
-  // the only place a non-exact basis (gated price, used/original-when-new,
-  // dealer-stated) explains itself, since that case draws no range bar above.
-  { const ex = pointExplain("Price vs MSRP", a); if (ex) { para(ex, { size: 8.5, font: serifI, color: SOFT, lead: 3, maxW: W }); advance(4); } }
-  // Where the buyer checks us. The PDF is the artifact that gets forwarded to
-  // the dealer, so the citation has to travel WITH the number -- a figure the
-  // reader cannot re-verify is one they have to take on trust, and this whole
-  // product exists because nobody should have to.
-  if (a.msrpSourceUrl) {
-    for (const ln of wrap(`Verify this MSRP on ${a.make || "the manufacturer"}'s own page: ${a.msrpSourceUrl}`, sans, 8.5, W)) {
-      need(12); T(ln, { size: 8.5, font: sans, color: SOFT }); y -= 11;
-    }
-    // That linked page shows the manufacturer's ALL-IN "from" price (freight/
-    // PDI, A/C charge, tire levy, etc. already added in), not this ex-freight
-    // trim MSRP -- the two numbers are EXPECTED to differ. Without this line,
-    // a reader who clicks through sees a bigger number and reasonably reads it
-    // as this report being wrong. Confirmed live 2026-08-21 (Vic, RAV4 PHEV GR
-    // SPORT AWD): the linked Toyota page shows $60,578 against this card's
-    // $57,500 -- both correct, on different bases (msrpAllIn is the same
-    // hand-verified catalog row, not a re-derived guess).
-    if (Number(a.msrpAllIn) > (Number(ms) || 0)) {
-      const gap = Math.round(Number(a.msrpAllIn) - (Number(ms) || 0));
-      for (const ln of wrap(`That page shows the ALL-IN total, ${money(a.msrpAllIn)} -- about ${money(gap)} more, covering freight/PDI, the A/C charge and other levies on top of the ${money(ms)} base MSRP above. Same trim, different basis, not a mismatch.`, sans, 8.5, W)) {
-        need(12); T(ln, { size: 8.5, font: sans, color: SOFT }); y -= 11;
+      if (a.financeContingent && a.financeContingent.contingent) {
+        section("PRICE DEPENDS ON FINANCING WITH THE DEALER", "This price is tied to taking the dealer's financing", LT.raise,
+          a.financeContingent.evidence ? [{ k: "The listing says", v: `"...${String(a.financeContingent.evidence).replace(/[^ -~]/g, " ")}..."`, vf: serifI }] : [],
+          "The listing's own wording conditions the advertised price on financing through the dealer. Pay cash, or use your own bank, and the price can legitimately change - the discount is often funded by the dealer's commission on the loan, so it leaves with the loan.",
+          'Ask: "What is the price if I pay cash or use my own bank - and if it changes, by exactly how much?" In writing.');
       }
-    }
-    y -= 6;
-  }
-  rule();
-
-  // ---- WHAT THE REPORT FOUND, IN DOLLARS ----
-  //
-  // This was a vector semicircle gauge reading "LEVERAGE / OUT OF 10" with a
-  // needle, a red-to-green sweep and a 38pt score. It was the report's
-  // signature instrument and the buyer could do nothing with it: 2.7 out of 10
-  // on a 2026 Lexus NX cannot be checked, quoted to a dealer, or read as good
-  // or bad news. design-must-be-self-explanatory is a hard rule -- real dollars
-  // and their basis, never an abstract score -- and this broke it in the most
-  // prominent position the PDF has.
-  //
-  // The SAME headline the on-screen report now leads with, from the same
-  // author (_shared/leverage.ts). Two surfaces, one sentence: the emailed PDF
-  // and the screen disagreeing about the same car is the defect this report's
-  // whole history keeps repeating.
-  const lh = (a.leverageScore && (a.leverageScore as any).headline) || null;
-  if (lh) {
-    need(96);
-    if (lh.total != null) {
-      kicker("ON THE TABLE");
-      T(money(Math.round(Number(lh.total))), { size: 30, font: sansB, color: CORAL });
-      y -= 30;
-      for (const d of lh.dollars) {
-        need(16);
-        T(`${money(Math.round(Number(d.amount)))}  ${d.label}`, { size: 10, font: sans, color: INK });
-        y -= 13;
-        if (d.detail) { T(String(d.detail), { size: 8.5, font: serifI, color: SOFT }); y -= 12; }
+      if (dealerFeeTotal(a) > 0) {
+        const dli = a.dealerLineItems;
+        const inside = dli.insideAdvertisedPrice;
+        section("THE DEALER'S OWN PRICE BREAKDOWN",
+          inside === true ? "The dealer itemised their price on the listing. These charges are already included in the advertised price - they are not added on top."
+            : inside === false ? "The dealer itemised their price on the listing. These charges sit on top of the advertised price."
+            : "The dealer itemised their price on the listing. It does not say whether these are inside the advertised price or on top of it - ask.",
+          NAVY,
+          [...dli.fees.map((f: any) => ({ k: String(f.name), v: "$" + Number(f.amount).toLocaleString("en-CA"), vf: monoB })),
+           ...(dli.incentives || []).map((d: any) => ({ k: String(d.name), v: "-$" + Number(d.amount).toLocaleString("en-CA"), vf: monoB, vc: LT.clear }))],
+          undefined,
+          `The $${dealerFeeTotal(a).toLocaleString("en-CA")} ${dli.fees.length === 1 ? "fee is" : "fees are"} the dealer's own - not the manufacturer's and not a government charge - so ${dli.fees.length === 1 ? "it is" : "they are"} the line to ask about.`);
       }
-    } else {
-      kicker("WHAT THESE CHECKS FOUND");
-      T(lh.state === "noted" ? "Nothing priced" : "Nothing flagged", { size: 18, font: sansB, color: INK });
-      y -= 22;
-    }
-    for (const f of lh.facts) { need(14); T("• " + String(f), { size: 10, font: sans, color: INK }); y -= 13; }
-    // The one sentence, so a reader who skips the list still gets the finding.
-    para(String(lh.line), { size: 8.5, font: serifI, color: SOFT, lead: 3, maxW: W });
-    advance(6);
-    rule();
-  }
-
-  // ---- DEPRECIATION PER YEAR ---- Vic, 2026-09-10, spotted on the Brasso
-  // Nissan Armada ($72,999 asking vs $97,556 MSRP, a ~$24.5k gap on a ~1-year
-  // demo): "we clearly need ... deprecation gauge per year in dollars".
-  // Real-data-only: needs a real MSRP, a real asking price BELOW it (a used
-  // vehicle priced AT OR OVER MSRP hasn't "depreciated", so the gauge is
-  // omitted rather than shown negative), and a real age basis. We don't carry
-  // an in-service date, so age is estimated from model year and labelled as
-  // such -- same honesty rule warrantyLine() already uses for this same gap.
-  // [[no-llm-generated-valuation-numbers]] [[design-must-be-self-explanatory]]
-  if (ms > 0 && qp > 0 && ms > qp && a.vehicleCondition !== "new" && Number(a.year) > 0) {
-    const nowYear = new Date().getFullYear();
-    const ageYears = Math.max(0.5, nowYear - Number(a.year));
-    const perYear = (ms - qp) / ageYears;
-    need(56);
-    kicker("DEPRECIATION SINCE NEW");
-    T(money(Math.round(perYear)) + " / YEAR", { size: 22, font: sansB, color: INK });
-    y -= 26;
-    para(`${money(ms - qp)} below MSRP over an estimated ${ageYears.toFixed(1)} year${ageYears >= 1.5 ? "s" : ""} (from the ${a.year} model year, not a confirmed in-service date -- ask for it in writing to firm this up).`, { size: 8.5, font: serifI, color: SOFT, lead: 3, maxW: W });
-    advance(6);
-    rule();
-  }
-
-  // ---- THE AUDIT: at least 10, more when the report has more to say ----
-  // The heading states the REAL count rather than a hardcoded "10", because
-  // ten is the advertised FLOOR, not the delivered number (see tenPoints()).
-  // A hardcoded 10 over a longer list is the same self-contradiction the app
-  // shipped: "The 10-point verification" printed above 14 tiles.
-  const POINTS = tenPoints(a);
-  // TEN, THEN THE EXTRAS -- under their own heading.
-  //
-  // This printed `${POINTS.length}-POINT AUDIT`, which is derived and honest
-  // about the count but calls an "MSRP per trim" card a verification point and
-  // disagrees with the ten we advertise. The ten are a defined core; everything
-  // a particular listing additionally supported is real, is printed in full
-  // (Vic: "yes add them to pdf file all 14"), and is named for what it is.
-  // Same split as the on-screen heatmap, from the same canonical list.
-  const CORE = POINTS.slice(0, POINT_TITLES.length);
-  const EXTRA = POINTS.slice(POINT_TITLES.length);
-  kicker(`${CORE.length}-POINT AUDIT`);
-  const toneColor: Record<string, any> = { pass: TEAL, flag: CORAL, muted: FAINT };
-  // Light tints of each accent, for a white ground.
-  const toneChipBg: Record<string, any> = { pass: rgb(0.863, 0.941, 0.925), flag: rgb(0.984, 0.894, 0.855), muted: rgb(0.922, 0.937, 0.957) };
-  const toneChipText: Record<string, string> = { pass: "PASS", flag: "FLAG", muted: "—" };
-  // COLUMN COUNT IS PER CLUSTER, not one global 3.
-  // The ten canonical points land 4 / 4 / 2 across the three clusters, and the
-  // mockup lays each out flush: four across, four across, then two at half
-  // width. A fixed 3 left Safety with a lone orphan tile on a second row and
-  // Trust with a third of a row blank -- two ragged holes the mockup does not
-  // have, on the page Vic compared side by side.
-  const TILE_GAP = 10, TILE_PAD = 11;
-  const tileW = (cols: number) => (W - TILE_GAP * (cols - 1)) / cols;
-  // COLUMNS ARE DERIVED FROM THE POINT COUNT, so no row is ever ragged.
-  // The mockup lays its clusters out 4 / 4 / 2 because its tile subs are one
-  // short sentence each. Production's subs come from pointExplain and run to a
-  // paragraph, so at four columns (113pt wide) a tile grows past 130pt tall and
-  // the next row cannot fit the page. The column count is CHOSEN per cluster
-  // further down (colsFor), by measuring both candidate grids -- see there.
-  type Pt = { t: string; v: string; tone: string };
-  // Memoised: colsFor measures BOTH candidate grids, firstBlockHeight measures
-  // again, drawTileGrid measures per row and drawTile measures once more to
-  // draw -- about six identical pointExplain + wrap passes per point, each of
-  // which measures every word. Same output, one pass per (point, cols).
-  const noteCache = new Map<string, string[]>();
-  const tileNoteLines = (p: Pt, cols: number) => {
-    const k = `${cols}\u0000${p.t}`;
-    let v = noteCache.get(k);
-    if (!v) { v = wrap(pointExplain(p.t, a) || "", serifI, 8, tileW(cols) - TILE_PAD * 2); noteCache.set(k, v); }
-    return v;
-  };
-  // NO GLOBAL MINIMUM HEIGHT.
-  // The mockup sets min-height:118px (88.5pt) on its tiles so a row reads as one
-  // object. Ported as a floor on tileHeight it was dead weight: a tile clears
-  // 88.5pt at three wrapped note lines, and every pointExplain string wraps to
-  // at least three at these widths, so the floor never once bound -- measured
-  // identical page geometry with and without it. drawTileGrid already sizes each
-  // row to its tallest tile, which is what actually makes a row read flush.
-  const tileHeight = (p: Pt, cols: number) =>
-    TILE_PAD * 2 + 12 /* label row */ + 6 + 15 /* value */ + 6 + tileNoteLines(p, cols).length * 10.5;
-  // At four columns a tile is ~113pt wide, so a long value ("46,680 km FLAG")
-  // overruns 13pt. Step it down on the font's own metrics rather than clipping.
-  const tileValueSize = (v: string, cols: number) => {
-    let sz = 13;
-    while (sz > 8 && wSafe(monoB, v, sz) > tileW(cols) - TILE_PAD * 2) sz -= 0.5;
-    return sz;
-  };
-  const drawTile = (x: number, yTop: number, rowH: number, p: Pt, cols: number) => {
-    const tone = toneColor[p.tone] || INK, bg = toneChipBg[p.tone] || TRACK, TW = tileW(cols);
-    rrect(x, yTop, TW, rowH, 9, { color: TRACK, borderColor: HAIR, borderWidth: 0.7 });
-    // The accent bar belongs on the tile's TOP edge, inset from both sides
-    // (mockup `.tile .bar { top: 0; left: 14px; right: 14px }`). It was drawn
-    // at `yTop - rowH` -- the BOTTOM edge, full width -- so every tile was
-    // underlined instead of capped.
-    page.drawRectangle({ x: x + 14, y: yTop - 2.2, width: Math.max(TW - 28, 0), height: 1.6, color: tone });
-    let ty = yTop - TILE_PAD;
-    // label (left) + tone chip (right), same row
-    Tat(p.t, ty - 8.5, { x: x + TILE_PAD, size: 8, font: sansB, color: FAINT });
-    const chipLbl = toneChipText[p.tone] || "—", chipW = wSafe(sansB, chipLbl, 6.5) + 12;
-    rrect(x + TW - TILE_PAD - chipW, ty + 0.5, chipW, 11, 5.5, { color: bg });
-    center(chipLbl, ty - 8, { size: 6.5, font: sansB, color: tone, cx: x + TW - TILE_PAD - chipW / 2 });
-    ty -= 18;
-    Tat(p.v, ty - 13, { x: x + TILE_PAD, size: tileValueSize(p.v, cols), font: monoB, color: tone });
-    ty -= 21;
-    for (const ln of tileNoteLines(p, cols)) { Tat(ln, ty - 8, { x: x + TILE_PAD, size: 8, font: serifI, color: SOFT }); ty -= 10.5; }
-  };
-  // AN OUTLIER-LONG NOTE TAKES THE FULL WIDTH.
-  // A row is as tall as its tallest tile, so one point whose explanation runs
-  // far longer than its neighbours' inflates the whole row -- and a row too
-  // tall for the space left on the page pushes to the next one, stranding the
-  // bottom of the previous page empty. That is the trailing whitespace Vic has
-  // now called out twice. Toyota's warranty-remaining note is the usual
-  // culprit at ~700 characters: 13 lines inside a two-column tile, 7 across the
-  // full width. Giving it the full width in place makes the CLUSTER shorter
-  // than it was and truncates nothing. [[report-never-empty]]
-  const WIDE_NOTE_LINES = 8;
-  const isWide = (p: Pt, cols: number) => cols > 1 && tileNoteLines(p, cols).length > WIDE_NOTE_LINES;
-  // THE COLUMN COUNT IS MEASURED, NOT ASSUMED.
-  // More columns is not automatically more compact: a narrower tile wraps its
-  // note to more lines, and a row costs the height of its tallest tile. For
-  // these explanations two wide columns frequently beat three narrow ones, and
-  // which way it falls depends on the actual strings, which are data. So both
-  // candidate grids are laid out arithmetically and the shorter one wins, with
-  // a flush grid breaking a tie -- shortest first because trailing whitespace
-  // is the thing Vic has called out twice, and no row is left ragged for free.
-  // gridHeight MIRRORS drawTileGrid exactly, full-width outliers included; if
-  // one changes the other must.
-  const gridHeight = (points: Pt[], cols: number) => {
-    let h = 0, buf: Pt[] = [];
-    const flushH = () => {
-      for (let i = 0; i < buf.length; i += cols) {
-        h += Math.max(...buf.slice(i, i + cols).map((p) => tileHeight(p, cols))) + TILE_GAP;
+      {
+        const POINTS = tenPoints(a);
+        const EXTRA = POINTS.slice(POINT_TITLES.length);
+        if (EXTRA.length) {
+          section(`ALSO CHECKED ON THIS LISTING (${EXTRA.length})`, "", NAVY, EXTRA.map((p: any) => ({ k: String(p.t), v: String(p.v), vf: monoB })));
+        }
       }
-      buf = [];
-    };
-    for (const p of points) {
-      if (isWide(p, cols)) { flushH(); h += tileHeight(p, 1) + TILE_GAP; } else buf.push(p);
-    }
-    flushH();
-    return h;
-  };
-  const colsFor = (points: Pt[]) => {
-    // A single point takes the whole width: at two columns it drew one tile
-    // beside an equal area of blank page.
-    if (points.length <= 1) return 1;
-    let best = 2, bestH = Infinity, bestRagged = 9;
-    for (const c of [2, 3]) {
-      const h = gridHeight(points, c);
-      // Raggedness counts the tiles that will actually SIT IN THE GRID --
-      // outlier-long notes are pulled out into their own full-width rows, so
-      // counting them made a ragged layout look flush and could win the
-      // tie-break on a false claim.
-      const inGrid = points.filter((p) => !isWide(p, c)).length;
-      const ragged = inGrid === 0 || inGrid % c === 0 ? 0 : 1;
-      if (h < bestH - 0.5 || (h <= bestH + 0.5 && ragged < bestRagged)) { best = c; bestH = h; bestRagged = ragged; }
-    }
-    return best;
-  };
-  // The height of whatever this cluster draws FIRST, so the header reservation
-  // knows what it is holding a place for.
-  const firstBlockHeight = (points: Pt[], cols: number) => {
-    if (!points.length) return 0;
-    if (isWide(points[0], cols)) return tileHeight(points[0], 1);
-    const run: Pt[] = [];
-    for (const p of points) { if (isWide(p, cols)) break; run.push(p); if (run.length === cols) break; }
-    return Math.max(...run.map((p) => tileHeight(p, cols)));
-  };
-  const drawTileGrid = (points: Pt[], cols: number) => {
-    const flush = (buf: Pt[]) => {
-      for (let i = 0; i < buf.length; i += cols) {
-        const row = buf.slice(i, i + cols);
-        const rowH = Math.max(...row.map((p) => tileHeight(p, cols)));
-        need(rowH + 6);
-        row.forEach((p, ci) => drawTile(M + ci * (tileW(cols) + TILE_GAP), y, rowH, p, cols));
-        y -= rowH + TILE_GAP;
+      if (a.recalls?.checked && a.recalls.count > 0 && (a.recalls.items || []).length) {
+        const rows = a.recalls.items.map((it: any) => recallDigest(it)).filter(Boolean).map((d: any) => ({ k: d.title, v: d.line }));
+        section("OPEN RECALLS - TRANSPORT CANADA", `${a.recalls.count} open recall${a.recalls.count === 1 ? "" : "s"} on record`, LT.raise, rows,
+          "Public safety-recall campaigns Transport Canada publishes for this year, make and model - government data, not our opinion. Confirm by VIN with the dealer; every listed repair is free of charge.",
+          recallsShownNote(a.recalls.count, a.recalls.items.length) || undefined);
       }
-    };
-    let buf: Pt[] = [];
-    for (const p of points) {
-      if (!isWide(p, cols)) { buf.push(p); continue; }
-      flush(buf); buf = [];
-      const h = tileHeight(p, 1);
-      need(h + 6);
-      drawTile(M, y, h, p, 1);
-      y -= h + TILE_GAP;
-    }
-    flush(buf);
-  };
-  // ---- THREE NAMED CLUSTERS ("the winner" -- Isometric Dashboard Wall,
-  // Vic, 2026-09-10) instead of one flat grid. The ten canonical points
-  // split cleanly 4/4/2 by what they're actually about -- Price vs MSRP
-  // stays excluded here since it already has hero treatment above.
-  const clusterOf = (t: string) => (
-    ["Add-ons & fee audit", "Financing math", "EV / PHEV rebate"].includes(t) ? "money" :
-    ["Transport Canada recalls", "Included warranty", "Odometer", "VIN check"].includes(t) ? "safety" :
-    ["AMVIC", "Dealer reputation"].includes(t) ? "trust" : "money"
-  );
-  const clusters: Array<{ key: string; label: string; dot: any; blurb: string }> = [
-    { key: "money", label: "PRICE & FINANCING", dot: TEAL, blurb: "What this vehicle costs against the manufacturer's own numbers, and what's added on top." },
-    { key: "safety", label: "SAFETY & COVERAGE", dot: CORAL, blurb: "Open recalls and how much factory protection is left on this specific vehicle." },
-    // "TRUST" was a verdict word: it read as LotCheck vouching for the dealer,
-    // which is not something we do or could defend. This section reports what
-    // two public sources say and nothing more -- AMVIC's licence register, and
-    // the dealer's own publicly posted customer rating. The blurb keeps naming
-    // the basis, because one of the two is a public RATING rather than a
-    // register entry and the heading must not flatten that. [[no-accusation-language]]
-    { key: "trust", label: "PUBLIC RECORD", dot: AMBER, blurb: "Who you'd be dealing with, by the public record and the dealer's own published rating." },
-  ];
-  for (const cl of clusters) {
-    const points = CORE.filter((p) => p.t !== "Price vs MSRP" && clusterOf(p.t) === cl.key);
-    if (!points.length) continue;
-    // A section header is worth nothing at the foot of a page with its tiles
-    // on the next one, so the reservation covers the header, its blurb AND the
-    // first tile row -- the smallest unit that still reads as one section.
-    // (need(34) covered the header and blurb only, which is how a cluster
-    // heading could land alone above a page break.)
-    const blurbH = wrap(cl.blurb, sans, 8, W).length * 11;
-    const cols = colsFor(points);
-    const firstRowH = firstBlockHeight(points, cols);
-    need(17 + blurbH + 4 + firstRowH + 6);
-    page.drawCircle({ x: M + 3.5, y: y - 5, size: 3.5, color: cl.dot });
-    T(cl.label, { x: M + 13, size: 8.5, font: sansB, color: SOFT });
-    page.drawLine({ start: { x: M + 13 + wSafe(sansB, cl.label, 8.5) + 10, y: y - 6.5 }, end: { x: M + W, y: y - 6.5 }, thickness: 0.7, color: HAIR });
-    y -= 17;
-    para(cl.blurb, { size: 8, font: sans, color: FAINT, lead: 3 });
-    advance(4);
-    drawTileGrid(points, cols);
-    advance(4);
-  }
-  advance(2); rule();
-
-  if (EXTRA.length) {
-    // ---- ALSO CHECKED -- chip strip (concept #7). Extra context this listing
-    // happened to support; never counted among the ten, so it reads as a row
-    // of small pills, not another numbered list. ----
-    //
-    // THE STRANDED-STRIP BUG. `rowTop` used to be captured from `y` BEFORE the
-    // need() that followed it. When the kicker fit at the foot of a page but
-    // the chips did not, need() started a fresh page and reset `y` to its top
-    // -- while `rowTop` still held the PREVIOUS page's bottom. The strip drew
-    // at the foot of the new page and left everything above it blank, and the
-    // need() inside the wrap loop did the same thing again per row.
-    //
-    // Reported live 2026-09-10 (report LC-01EE-2B7, a used 2024 Land Cruiser):
-    // page 2 ended on the words "ALSO CHECKED ON THIS LISTING (3)", page 3 held
-    // those three chips alone at its foot and nothing else. Vic: "3rd page is
-    // empty".
-    //
-    // The fix is to MEASURE the whole block -- header plus every wrapped row --
-    // and reserve it once, up front, before a single mark is made. Nothing
-    // inside the layout calls need() any more, so `y` cannot move under it and
-    // the header can never be separated from its strip.
-    const CHIP_H = 22, CHIP_GAP = 8;
-    const chipWidth = (p: { t: string; v: string }) =>
-      wSafe(sansB, `${p.t}: `, 8) + wSafe(monoB, p.v, 8) + 24;
-    let chipRows = 1, lineUsed = 0;
-    for (const p of EXTRA) {
-      const cw = chipWidth(p);
-      if (lineUsed > 0 && lineUsed + cw > W) { chipRows++; lineUsed = cw + CHIP_GAP; }
-      else lineUsed += cw + CHIP_GAP;
-    }
-    need(18 + chipRows * CHIP_H + (chipRows - 1) * CHIP_GAP + 10);
-    kicker(`ALSO CHECKED ON THIS LISTING (${EXTRA.length})`);
-    let cx2 = M, rowTop = y;
-    for (const p of EXTRA) {
-      const label = `${p.t}: `, valTxt = p.v, cw = chipWidth(p);
-      // `cx2 > M` guards the first chip on a row: a single chip wider than the
-      // full column used to wrap before it was ever drawn, costing a blank row.
-      if (cx2 > M && cx2 + cw > M + W) { cx2 = M; rowTop -= CHIP_H + CHIP_GAP; }
-      rrect(cx2, rowTop, cw, CHIP_H, CHIP_H / 2, { borderColor: HAIR, borderWidth: 0.7, color: PAPER });
-      Tat(label, rowTop - CHIP_H / 2 - 3, { x: cx2 + 12, size: 8, font: sansB, color: FAINT });
-      Tat(valTxt, rowTop - CHIP_H / 2 - 3, { x: cx2 + 12 + wSafe(sansB, label, 8), size: 8, font: monoB, color: INK });
-      cx2 += cw + CHIP_GAP;
-    }
-    y = rowTop - CHIP_H - 4;
-    rule();
-  }
-
-  // ---- THE DEALER'S OWN PRICE BREAKDOWN ----
-  // Printed because the dealer published it. Where the page's arithmetic
-  // proves the fees are already inside the advertised price, the copy says so
-  // and never implies they were added on top. The buyer's useful takeaway is
-  // which line is the dealer's own -- that is the one they can ask about.
-  if (dealerFeeTotal(a) > 0) {
-    const dli = a.dealerLineItems;
-    kicker("THE DEALER'S OWN PRICE BREAKDOWN");
-    const inside = dli.insideAdvertisedPrice;
-    para(inside === true
-        ? "The dealer itemised their price on the listing. These charges are already included in the advertised price - they are not added on top."
-      : inside === false
-        ? "The dealer itemised their price on the listing. These charges sit on top of the advertised price."
-        : "The dealer itemised their price on the listing. It does not say whether these are inside the advertised price or on top of it - ask.",
-      { size: 9, font: sans, color: SOFT, lead: 3 });
-    advance(4);
-    for (const f of dli.fees) {
-      need(15);
-      T(pdfSafe(String(f.name)), { size: 9.5, font: sans, color: INK });
-      right("$" + Number(f.amount).toLocaleString("en-CA"), { size: 9.5, font: monoB, color: INK });
-      y -= 14;
-    }
-    for (const d of (dli.incentives || [])) {
-      need(15);
-      T(pdfSafe(String(d.name)), { size: 9.5, font: sans, color: SOFT });
-      right("-$" + Number(d.amount).toLocaleString("en-CA"), { size: 9.5, font: monoB, color: TEAL });
-      y -= 14;
-    }
-    advance(3);
-    para(`The $${dealerFeeTotal(a).toLocaleString("en-CA")} ${dli.fees.length === 1 ? "fee is" : "fees are"} the dealer's own - not the manufacturer's and not a government charge - so ${dli.fees.length === 1 ? "it is" : "they are"} the line to ask about.`,
-      { size: 8.5, font: serifI, color: SOFT, lead: 3 });
-    rule();
-  }
-
-  // ---- MSRP PER TRIM — the factory range (client-derived, shape-validated;
-  // standing requirement 2026-08-19: the buyer sees the manufacturer's range
-  // with the source named, even when the dealer hides the trim) ----
-  if (trimRangeOk(a.trimRange)) {
-    const tr = a.trimRange;
-    const qpT = Number(a.quotedPrice) || 0;
-    const aboveN = qpT > 0 ? tr.t.filter((x: any) => qpT > Number(x.m)).length : 0;
-    const allExcl = tr.t.every((x: any) => Number(x.b) === 1);
-    need(64 + tr.t.length * 13);
-    kicker("MSRP PER TRIM");
-    T(`${tr.y} ${pdfSafe(tr.mk)} ${pdfSafe(tr.md)} - the manufacturer's price per trim${allExcl ? " (before freight & fees)" : ""}`, { size: 10.5, font: sansB }); y -= 18;
-    // Capped VIEW, honest COUNT. The on-screen card, the flipbook and this PDF
-    // used to truncate at three different numbers (all, 10, 12) and none said
-    // so, giving one signed report several answers to "how many trims does the
-    // manufacturer publish".
-    const TRIM_ROWS_SHOWN = 12;
-    for (const x of tr.t.slice(0, TRIM_ROWS_SHOWN)) {
-      need(13);
-      T(pdfSafe(x.p ? `${x.p} · ${x.n}` : x.n), { size: 9, font: sans, color: SOFT });
-      right(`$${Number(x.m).toLocaleString("en-CA")}${Number(x.b) === 1 ? " + freight" : ""}`, { size: 9, font: sansB });
-      y -= 13;
-    }
-    if (tr.t.length > TRIM_ROWS_SHOWN) {
-      advance(2);
-      T(`Showing ${TRIM_ROWS_SHOWN} of ${tr.t.length} published trims.`, { size: 7.5, font: mono, color: FAINT });
-      y -= 11;
-    }
-    if (qpT > 0) { advance(3); para(`The asking price $${qpT.toLocaleString("en-CA")} sits above ${aboveN} of ${tr.t.length} published trim prices.${allExcl ? " Catalog prices exclude freight & fees - compare like-for-like." : ""}`, { size: 8.5, font: serifI, color: SOFT, lead: 3 }); }
-    const site = EMAIL_MAKE_SITE[tr.mk];
-    if (site) { advance(2); T("Source: confirm the range at " + site.replace(/^https:\/\/(www\.)?/, ""), { size: 7.5, font: mono, color: FAINT }); y -= 11; }
-    rule();
-  }
-
-  // ---- DAYS ON LOT — the motivated-seller clock (dealer's own inventory data)
-  // Rendered as the same alert card the app shows (white frame, tier-coloured
-  // panel, first-seen date box, traffic light, CTA chip) so the PDF carries the
-  // report's visual language, not a plain-text shadow of it.
-  {
-    // The single-sighting state on paper too: the PDF is what a buyer carries
-    // into the dealership, so it must not be the one surface still implying a
-    // duration we never measured.
-    const dl = daysOnLotLine(a);
-    if (a.daysOnLot && dl && !(Number(a.daysOnLot.days) > 0)) {
-      kicker("DAYS ON LOT");
-      para(dl.line);
-    }
-    const sv = sameVinElsewhereLine(a);
-    if (sv) { kicker("ALSO ADVERTISED ELSEWHERE"); para(sv.line); }
-    const pm = priceMovesLine(a);
-    if (pm) { kicker("ADVERTISED PRICE MOVES"); para(pm.line); }
-  }
-  if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
-    const d = Math.round(Number(a.daysOnLot.days));
-    const dolMonths = d >= 60 ? (d / 30.4).toFixed(1).replace(/\.0$/, "") : null;
-    // Same tiers as the app card: green < 31, amber 31-89, red 90+.
-    const tier = d >= 90 ? 2 : d >= 31 ? 1 : 0;
-    // THE WHITE HOLE. This card was ported from the app's light-theme alert
-    // card and kept its literals: a pure white frame (rgb 1,1,1) with a 2pt
-    // near-black border, a panel flooded in #8ED500 lime / #FFB020 / #FF3B5C,
-    // and body copy in #141414. On the diorama's #05070b page it read as a
-    // hole punched through the document -- the single most off-palette element
-    // in the report (Vic, 2026-09-10: the PDF is nowhere near the design).
-    // Same geometry, same traffic light, diorama tokens throughout.
-    const ACC = [TEAL, AMBER, CORAL][tier];
-
-    const sinceD = a.daysOnLot.since ? new Date(a.daysOnLot.since + "T00:00:00") : null;
-    const M3 = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
-
-    const CARD_W = 330, CX = (PW - CARD_W) / 2, PADX = 20;
-    const bodyTxt =
-      `${dolMonths ? `About ${dolMonths} months` : `${d.toLocaleString("en-CA")} days`} on the dealer's lot` +
-      `${a.daysOnLot.since ? ` - first seen ${a.daysOnLot.since}` : ""}. Source: ${a.daysOnLot.sourceLabel || "dealer inventory data"}. ` +
-      (tier === 2
-        ? "Well past the typical turn window - every extra week costs the dealer real money. Concrete discount leverage."
-        : tier === 1
-          ? "A month-plus on the lot - worth asking what they'll do on price to move it."
-          : "Recently listed - limited sitting-time leverage on this unit.");
-    const bodyW = CARD_W - PADX * 2 - 34;   // right inset clears the traffic light
-    const bodyLines = wrap(bodyTxt, sans, 9, bodyW);
-    const STRIP = 44, TITLE_H = 26, LINE_H = 12.5, CHIP_H = 20;
-    const panelH = 16 + TITLE_H + bodyLines.length * LINE_H + 12 + CHIP_H + 16;
-    const CARD_H = STRIP + panelH;
-
-    need(CARD_H + 46);
-    kicker("DAYS ON LOT");
-    const top = y;                          // PDF y of the card's top edge
-    // white frame + dark border
-    rrect(CX, top, CARD_W, CARD_H, 10.5, { color: TRACK, borderColor: HAIR, borderWidth: 0.7 });
-    // tier-coloured content panel
-    // The tier colour is now a 2pt accent cap on the panel instead of a full
-    // flood: a whole panel of saturated teal/amber/coral would fight the page
-    // as hard as the lime did, and the mockup only ever uses an accent bar.
-    rrfill(CX + 0.7, top - STRIP, CARD_W - 1.4, panelH - 1.4, 9.8, PANEL2);
-    page.drawRectangle({ x: CX + 14, y: top - STRIP - 2.2, width: CARD_W - 28, height: 1.6, color: ACC });
-    // brand mark on the white strip
-    drawLogo(CX + 12, top - 6, 34);
-    // first-seen date box (dark, accent-bordered), straddling strip and panel
-    const DB = 54, DBX = CX + CARD_W - DB - 16, DBY = top - 12;
-    rrect(DBX, DBY, DB, DB, 7, { color: PAPER, borderColor: ACC, borderWidth: 1 });
-    if (sinceD) {
-      center(`${M3[sinceD.getMonth()]} ${sinceD.getFullYear()}`, DBY - 15, { cx: DBX + DB / 2, size: 6.5, font: sansB, color: ACC });
-      center(String(sinceD.getDate()), DBY - 34, { cx: DBX + DB / 2, size: 17, font: serifB, color: ACC });
-      center("FIRST SEEN", DBY - 46, { cx: DBX + DB / 2, size: 5.5, font: sansB, color: ACC });
-    } else {
-      center(`${d.toLocaleString("en-CA")}d`, DBY - 34, { cx: DBX + DB / 2, size: 15, font: serifB, color: ACC });
-    }
-    // traffic light below the date box — the tier's bulb is lit
-    const TLX = DBX + DB / 2, TLTOP = DBY - DB - 10, BULB = 5.5, GAP = 16, TL_PAD = 7;
-    // THE HOUSING IS DERIVED FROM THE BULBS IT CONTAINS, so the two cannot
-    // disagree. Hand-computing it is exactly how the bottom bulb came to hang
-    // 2.5pt below its own enclosure (reviewed 2026-09-10): the box was ported
-    // from drawRectangle, whose `y` is the BOTTOM edge, to rrect, whose `y` is
-    // the TOP, and the conversion picked up a stray +5. Now the box is always
-    // TL_PAD beyond the outermost bulb centres, whatever those become.
-    const bulbCy = [0, 1, 2].map((i) => TLTOP - BULB - 2 - i * GAP);
-    const tlTop = bulbCy[0] + BULB + TL_PAD, tlBottom = bulbCy[2] - BULB - TL_PAD;
-    rrect(TLX - 10, tlTop, 20, tlTop - tlBottom, 9, { color: PAPER, borderColor: HAIR, borderWidth: 0.7 });
-    ([[CORAL, tier === 2], [AMBER, tier === 1], [TEAL, tier === 0]] as const)
-      .forEach(([col, on], i) => {
-        page.drawCircle({ x: TLX, y: bulbCy[i], size: BULB, color: on ? col : HAIR });
-      });
-    // headline + body inside the panel
-    let cy = top - STRIP - 16;
-    Tat(`${d.toLocaleString("en-CA")} DAYS ON LOT`, cy - 17, { x: CX + PADX, size: 17, font: serifB, color: INK });
-    cy -= TITLE_H + 6;
-    for (const ln of bodyLines) { Tat(ln, cy - 9, { x: CX + PADX, size: 9, font: sans, color: SOFT }); cy -= LINE_H; }
-    // CTA chip (dark, accent text) — mirrors the app card's chip
-    const chipTxt = d >= 31 ? "ASK FOR A DISCOUNT" : "FRESH ON THE LOT";
-    const chipW = wSafe(sansB, chipTxt, 8) + 20;
-    rrect(CX + PADX, cy - 6, chipW, CHIP_H, CHIP_H / 2, { color: PAPER, borderColor: ACC, borderWidth: 0.7 });
-    Tat(chipTxt, cy - CHIP_H + 1, { x: CX + PADX + 10, size: 8, font: sansB, color: ACC });
-    y = top - CARD_H - 12;
-
-    para(a.daysOnLot.atLeast === true
-      ? "This is how long we have seen this exact car listed in our own daily tracking. It may have been sitting longer before we first saw it, so treat it as a floor rather than a total. Dealers pay interest on unsold stock every week, so the longer one sits, the more motivated they are to move it."
-      : "This is how long this exact car has sat unsold, counted by the dealer's own inventory system - not our guess. Dealers pay interest on unsold stock every week, so the longer one sits, the more motivated they are to move it.",
-      { size: 8.5, font: serifI, color: SOFT, lead: 3 });
-    const careAsk = dolCareAskTxt(d).trim();
-    if (careAsk) { advance(3); para(careAsk, { size: 8.5, font: serif, color: SOFT, lead: 3 }); }
-    rule();
-  } else {
-    // The PDF omitted this section entirely when we could not read a date, so a
-    // buyer never learned the question existed. An unanswered check still gets
-    // its heading and a usable instruction.
-    need(60);
-    kicker("DAYS ON LOT");
-    T("Not published - ask the dealer", { size: 14, font: serifB, color: SOFT }); y -= 19;
-    para("This dealer's platform does not expose an inventory date, and we have not yet seen this VIN in our own daily tracking.", { size: 9, color: SOFT, lead: 4 });
-    advance(2);
-    para("Ask them outright: \"How long has this exact car been on your lot?\" A car that has sat 90+ days is carrying real cost for them, and it is an easy question to answer and an awkward one to dodge. We could not read it here, so we are not guessing at it.",
-      { size: 8.5, font: serifI, color: SOFT, lead: 3 });
-    rule();
-  }
-
-  // ---- HOW THIS VEHICLE COMPARES WITH THE ALBERTA MARKET ----
-  // Three plain lines (this vehicle / similar listings in Alberta / difference)
-  // from the shared builder (report-lines.js marketCompareLine): the words in
-  // this PDF are the words in the HTML deck and on screen. A context section
-  // like DAYS ON LOT, not one of the fixed audit points, and it renders
-  // whenever a comparison set exists -- the not-enough state still gets its
-  // heading and its reason. T/para run every string through pdfSafe, so the
-  // builder's em dashes print as hyphens (the PDF fonts encode WinAnsi only).
-  if (a.marketValue) {
-    const line = marketCompareLine(a);
-    const lines: Array<{ k: string; v: string }> = Array.isArray(line.lines) ? line.lines : [];
-    const headColor = line.light === "red" ? CORAL : line.light === "green" ? TEAL : INK;
-    need(96);
-    kicker(line.title.toUpperCase());
-    T(noEmDash(line.headline), { size: 13, font: serifB, color: headColor }); y -= 18;
-    if (line.lightLabel) { T(noEmDash(line.lightLabel), { size: 9, font: sans, color: SOFT }); y -= 14; }
-    for (const l of lines) {
-      need(28);
-      T(noEmDash(l.k).toUpperCase(), { size: 8, font: sansB, color: FAINT }); y -= 11;
-      para(noEmDash(l.v), { size: 9.5, color: INK, lead: 3 });
-      advance(3);
-    }
-    if (line.note) para(noEmDash(line.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
-    rule();
-  }
-
-  // ---- WHAT OLDER MODEL YEARS ASK TODAY ----
-  // The model-year ladder as one line (this vehicle / one, two, three years
-  // older) from the shared builder (report-lines.js olderYearsLine): the words
-  // in this PDF are the words in the HTML deck and on screen. A context section
-  // like the comparison above, and it renders whenever the ladder exists -- the
-  // not-read and not-enough states still get their heading and their reason.
-  // T/para run every string through pdfSafe; the builder's em dashes print as
-  // hyphens (the PDF fonts encode WinAnsi only).
-  if (a.olderYears) {
-    const oyLine = olderYearsLine(a);
-    const oyLines: Array<{ k: string; v: string }> = Array.isArray(oyLine.lines) ? oyLine.lines : [];
-    need(96);
-    kicker(oyLine.title.toUpperCase());
-    // para(), not T(): T draws one unwrapped line, and this headline can be a
-    // full sentence -- it would run off the right edge of the page.
-    para(noEmDash(oyLine.headline), { size: 13, font: serifB, color: oyLine.state === "confirmed" ? INK : SOFT, lead: 4 });
-    advance(4);
-    if (oyLine.meta) { T(noEmDash(oyLine.meta), { size: 9, font: sans, color: SOFT }); y -= 14; }
-    for (const l of oyLines) {
-      need(28);
-      T(noEmDash(l.k).toUpperCase(), { size: 8, font: sansB, color: FAINT }); y -= 11;
-      para(noEmDash(l.v), { size: 9.5, color: INK, lead: 3 });
-      advance(3);
-    }
-    // The not-read state carries its reason in the body and no lines, so the
-    // body is what prints when there is no line to print.
-    if (!oyLines.length && oyLine.body) para(noEmDash(oyLine.body), { size: 9, color: SOFT, lead: 4 });
-    if (oyLine.note) para(noEmDash(oyLine.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
-    rule();
-  }
-
-  // ---- INSURANCE BEFORE YOU SIGN ----
-  // A sequencing warning from Alberta's insurance regulator, from the shared
-  // builder (report-lines.js financeCoverageLine): the words in this PDF are
-  // the words in the HTML deck and on screen. A context section like the two
-  // above, not one of the fixed audit points, and it carries no figure, no
-  // traffic light and no band -- five labelled lines and a citation.
-  //
-  // Alberta only: financeCoverageApplies() gates every surface identically,
-  // because the line cites Alberta statute and an Alberta regulator.
-  //
-  // BOTH states print the same five lines ("confirmed" when the listing itself
-  // shows financing, "general" when it does not), so the headline keeps INK in
-  // both -- there is no unread half here to grey out. T/para run every string
-  // through pdfSafe; the builder's em dashes print as hyphens (the PDF fonts
-  // encode WinAnsi only).
-  if (financeCoverageApplies(a)) {
-    const fcLine = financeCoverageLine(a);
-    const fcLines: Array<{ k: string; v: string }> = Array.isArray(fcLine.lines) ? fcLine.lines : [];
-    need(96);
-    kicker(fcLine.title.toUpperCase());
-    // para(), not T(): T draws one unwrapped line, and this headline is a full
-    // sentence -- it would run off the right edge of the page.
-    para(noEmDash(fcLine.headline), { size: 13, font: serifB, color: INK, lead: 4 });
-    advance(4);
-    if (fcLine.meta) { T(noEmDash(fcLine.meta), { size: 9, font: sans, color: SOFT }); y -= 14; }
-    for (const l of fcLines) {
-      need(28);
-      T(noEmDash(l.k).toUpperCase(), { size: 8, font: sansB, color: FAINT }); y -= 11;
-      para(noEmDash(l.v), { size: 9.5, color: INK, lead: 3 });
-      advance(3);
-    }
-    // Same never-empty rule as the sections above: if the builder ever returned
-    // no lines, its body sentence is what prints.
-    if (!fcLines.length && fcLine.body) para(noEmDash(fcLine.body), { size: 9, color: SOFT, lead: 4 });
-    if (fcLine.note) para(noEmDash(fcLine.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
-    rule();
-  }
-
-  // ---- YOUR PREMIUM AFTER THIS PURCHASE ----
-  // The COST sibling of the section above, from the shared builder
-  // (report-lines.js insurancePremiumLine): the words in this PDF are the words
-  // in the HTML deck and on screen. A context section like the ones above, not
-  // one of the fixed audit points, and it carries no figure, no traffic light
-  // and no band -- four labelled lines and a citation.
-  //
-  // Alberta only: financeCoverageApplies() gates every surface identically,
-  // because the line cites Alberta statute and an Alberta regulator.
-  //
-  // The builder reads NOTHING from the listing -- it is regulator copy,
-  // identical for every Alberta report -- so there is ONE state and the
-  // headline keeps INK; there is no unread half to grey out. T/para run every
-  // string through pdfSafe, which folds the builder's curly quotes around the
-  // regulator's quoted sentence to straight quotes and its em dashes to
-  // hyphens (the PDF fonts encode WinAnsi only).
-  if (financeCoverageApplies(a)) {
-    const ipLine = insurancePremiumLine(a);
-    const ipLines: Array<{ k: string; v: string }> = Array.isArray(ipLine.lines) ? ipLine.lines : [];
-    need(96);
-    kicker(ipLine.title.toUpperCase());
-    // para(), not T(): T draws one unwrapped line, and this headline is a full
-    // sentence -- it would run off the right edge of the page.
-    para(noEmDash(ipLine.headline), { size: 13, font: serifB, color: INK, lead: 4 });
-    advance(4);
-    if (ipLine.meta) { T(noEmDash(ipLine.meta), { size: 9, font: sans, color: SOFT }); y -= 14; }
-    for (const l of ipLines) {
-      need(28);
-      T(noEmDash(l.k).toUpperCase(), { size: 8, font: sansB, color: FAINT }); y -= 11;
-      para(noEmDash(l.v), { size: 9.5, color: INK, lead: 3 });
-      advance(3);
-    }
-    // Same never-empty rule as the sections above: if the builder ever returned
-    // no lines, its body sentence is what prints.
-    if (!ipLines.length && ipLine.body) para(noEmDash(ipLine.body), { size: 9, color: SOFT, lead: 4 });
-    if (ipLine.note) para(noEmDash(ipLine.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
-    rule();
-  }
-
-  // ---- OTHER LISTINGS READ -- the count, from the shared builder ----
-  // Outside the market-value conditional above so it ALWAYS RENDERS: an unread
-  // or empty set still gets its heading, its headline and the reason -- the
-  // same never-empty rule as the DAYS ON LOT else-branch.
-  {
-    const line = marketCountLine(a);
-    need(60);
-    kicker("OTHER LISTINGS READ");
-    T(noEmDash(line.headline), { size: 13, font: serifB, color: line.state === "confirmed" ? INK : SOFT }); y -= 18;
-    para(noEmDash(line.body), { size: 9, color: SOFT, lead: 4 });
-    rule();
-  }
-
-  // ---- DEALER LICENCE (point 4, "AMVIC") — public registry, verbatim
-  // status. Supplementary to the generic point-4 paragraph the CORE loop
-  // below prints (pointExplain's "AMVIC" case): this block adds the legal
-  // name, licence number and expiry the generic renderer has no room for.
-  // Promoted from an "also checked" extra 2026-09-10. ----
-  if (a.dealerLicence && a.dealerLicence.status) {
-    const L = a.dealerLicence, good = L.state === "valid";
-    need(70);
-    kicker("DEALER LICENCE - AMVIC PUBLIC REGISTRY");
-    T(String(L.status), { size: 14, font: serifB, color: good ? INK : CORAL }); y -= 19;
-    para(`${L.legalName ? L.legalName + " - " : ""}${L.licenceNumber ? "licence " + L.licenceNumber + " - " : ""}${L.expiryDate ? "expiry " + L.expiryDate + " - " : ""}source: AMVIC public licensee registry.`, { size: 9, color: SOFT, lead: 4 });
-    advance(2);
-    para(good
-      ? "AMVIC is Alberta's regulator; every business selling vehicles in the province must hold a licence. This dealer's registry entry currently reads as licensed."
-      : "AMVIC's registry currently shows this status for the matched business. Records can lag and businesses do reapply, so this is not a verdict - but ask for the current licence number and status in writing before any deposit, and verify it yourself on AMVIC's public search.",
-      { size: 8.5, font: serifI, color: SOFT, lead: 3 });
-    rule();
-  }
-
-  // ---- FINANCE-CONTINGENT PRICE (S37) ----
-  if (a.financeContingent && a.financeContingent.contingent) {
-    need(80);
-    kicker("PRICE DEPENDS ON FINANCING WITH THE DEALER");
-    T("This price is tied to taking the dealer's financing", { size: 13, font: serifB, color: INK }); y -= 18;
-    para("The listing's own wording conditions the advertised price on financing through the dealer. Pay cash, or use your own bank, and the price can legitimately change - the discount is often funded by the dealer's commission on the loan, so it leaves with the loan.", { size: 9, color: SOFT, lead: 4 });
-    if (a.financeContingent.evidence) { advance(2); para(`"...${String(a.financeContingent.evidence).replace(/[^ -~]/g, " ")}..."`, { size: 8.5, font: serifI, color: SOFT, lead: 3 }); }
-    advance(2);
-    para('Ask before you go in: "What is the price if I pay cash or use my own bank - and if it changes, by exactly how much?" In writing.', { size: 9, color: INK, lead: 4 });
-    rule();
-  }
-
-  // ---- PAYMENT DEFAULT -- the page's own pre-selected payment scenario ----
-  // ALWAYS RENDERS, same rule: "not published" and "not read" are answers.
-  {
-    const line = pageDefaultLine(a);
-    need(60);
-    kicker("PAYMENT STARTING POINT");
-    T(noEmDash(line.headline), { size: 13, font: serifB, color: line.state === "confirmed" ? INK : SOFT }); y -= 18;
-    para(noEmDash(line.body), { size: 9, color: SOFT, lead: 4 });
-    rule();
-  }
-
-  // ---- TRADE-IN TOOL (S36) — wholesale-anchored widget on the listing ----
-  if (a.tradeInWidget && a.tradeInWidget.detected) {
-    need(70);
-    kicker("TRADE-IN TOOL ON THIS LISTING");
-    T(`Instant trade-in appraisal widget${a.tradeInWidget.vendor ? ` (${a.tradeInWidget.vendor})` : ""}`, { size: 13, font: serifB, color: INK }); y -= 18;
-    para("Its number is anchored to the wholesale side of the market (what dealers pay each other), it is non-binding, and it appears in exchange for your contact and vehicle details.", { size: 9, color: SOFT, lead: 4 });
-    advance(2);
-    para("If you have a trade: settle this vehicle's price first; get the trade offer in writing on its own line - never one blended payment; and check retail listings for your own car before disclosing anything.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
-    rule();
-  }
-
-  // ---- RECALL DETAIL ----
-  if (a.recalls?.checked && a.recalls.count > 0 && (a.recalls.items || []).length) {
-    kicker("OPEN RECALLS - TRANSPORT CANADA");
-    para("Public safety-recall campaigns Transport Canada publishes for this year, make and model - government data, not our opinion. Confirm by VIN with the dealer; every listed repair is free of charge.", { size: 9, color: SOFT, lead: 4 });
-    advance(4);
-    // EVERY recall, not the first five. A slice(0, 5) under a printed count of
-    // seven is the silent cap fixed on 2026-08-20 growing back in a second
-    // place, and a recall dropped to save paper is the one failure this card
-    // cannot have. [[recalls-detail-list-must-match-count]] [[make-recalls-fail-safe]]
-    //
-    // Each is reduced to the campaign and the SAFETY RISK -- the sentence that
-    // changes what a buyer does. Transport Canada's full three-paragraph text
-    // is public and one click away, which is where it should be read.
-    const shown = a.recalls.items.length;
-    for (const it of a.recalls.items) {
-      const d = recallDigest(it);
-      if (!d) continue;
-      need(16); T("-  " + d.title, { size: 10, font: serifB, color: CORAL }); y -= 14;
-      para(d.line, { size: 9, color: SOFT, lead: 3, x: M + 12, maxW: W - 12 });
-      advance(3);
-    }
-    const capNote = recallsShownNote(a.recalls.count, shown);
-    if (capNote) { advance(2); para(capNote, { size: 9, color: SOFT, lead: 3 }); }
-    rule();
-  }
-
-  // ---- EV / PHEV REBATE ----
-  const ev = a.evapRebate;
-  if (ev && ev.eligible) {
-    need(80);
-    kicker("EV / PHEV REBATE");
-    const rTop = y;
-    Tat("REBATE AVAILABLE", rTop - 9, { size: 8, font: sansB, color: FAINT });
-    Tat(money(ev.total), rTop - 34, { size: 25, font: monoB, color: TEAL });
-    const bx = M + W / 2 + 14;
-    Tat("BREAKDOWN", rTop - 9, { x: bx, size: 8, font: sansB, color: FAINT });
-    Tat(money(ev.federal) + " federal" + (ev.provincial > 0 ? "  +  " + money(ev.provincial) + " " + (ev.prov_name || "provincial") : ""), rTop - 30, { x: bx, size: 12, font: serif, color: INK });
-    page.drawLine({ start: { x: M + W / 2, y: rTop - 6 }, end: { x: M + W / 2, y: rTop - 40 }, thickness: 0.7, color: HAIR });
-    y = rTop - 46;
-    if (ev.note) para(ev.note, { size: 9, color: SOFT, lead: 4 });
-    rule();
-  }
-
-  // ---- BOTTOM LINE ----
-  if (a.summary) {
-    need(60);
-    kicker("THE BOTTOM LINE");
-    page.drawLine({ start: { x: M, y: y - 2 }, end: { x: M, y: y - 46 }, thickness: 2.4, color: TEAL });
-    for (const ln of wrap(a.summary, serifI, 13, W - 20)) { need(19); page.drawText(ln, { x: M + 16, y: y - 13, size: 13, font: serifI, color: INK }); y -= 19; }
-    y -= 8;
-    rule();
-  }
-
-  // ---- WHAT TO SAY (counter-script) ----
-  if (a.counterScript && Array.isArray(a.counterScript.moves) && a.counterScript.moves.length) {
-    const cs = a.counterScript;
-    need(70);
-    kicker(cs.clean ? "SAY THIS TO CONFIRM" : "WHAT TO SAY AT THE DEALERSHIP");
-    para(cs.clean
-      ? "This deal looks straight - no add-ons or traps flagged. Just lock in the number:"
-      : "Read these to the dealer, in order. Each line comes from a finding above - say them and hold.",
-      { size: 9.5, font: serifI, color: SOFT, lead: 4 });
-    y -= 4;
-    cs.moves.forEach((mv: any, i: number) => {
-      const lines = wrap(pdfSafe(String(mv?.say || "")), serif, 11, W - 24);
-      if (!lines.length) return;
-      need(lines.length * 16 + 6);
-      page.drawText((i + 1) + ".", { x: M, y: y - 11, size: 11, font: sansB, color: TEAL });
-      for (const ln of lines) { page.drawText(ln, { x: M + 22, y: y - 11, size: 11, font: serif, color: INK }); y -= 16; }
-      y -= 3;
-    });
-    y -= 6;
-    rule();
-  }
-
-  // ---- CLOSING ---- The thank-you now lives on page 2 (the summary), so it
-  // is not repeated here -- and the old line assumed the buyer would sign.
-  // [[no-assume-the-client-signs]]
-  advance(8);
-
-  // ---- VERIFIED CLOSER ---- Vic, 2026-09-10: "i don't like qr code and check
-  // lc report on top right dosent look professional" -- dropped the QR code
-  // and the guilloché seal here in favour of the same plain check badge used
-  // in the masthead, plus a plain-text verify link. [[verification-needs-green-checkmark]]
-  if (verifyUrl) {
-    need(70);
-    drawCheckBadge(PW / 2, y - 24, 20);
-    y -= 54;
-    center("This report is verified — tamper-evident, checked against public sources.", y, { size: 9.5, font: sansB, color: TEAL });
-    y -= 15;
-    center("lotcheck.ca/verify  -  report No. " + RID, y, { size: 8.5, font: mono, color: SOFT });
-    y -= 16;
-  }
-
-  rule(HAIR, 0.7, 6);
-  // Pre-embed the sealed capture BEFORE the footer text so the footer can only
-  // promise pages that will actually exist (embed failures, oversize captures,
-  // and PNG pixel bombs all resolve to capImg = null here, never mid-promise).
-  let capImg: any = null;
-  if (sealedShot && sealedShot.b64.length <= SHOT_PDF_EMBED_CAP) {
-    try {
-      if (sealedShot.ext === "png") {
-        const px = pngPixelCount(sealedShot.bytes);
-        if (px !== null && px <= PNG_PIXEL_BUDGET) capImg = await doc.embedPng(sealedShot.bytes);
-        else console.warn(`Capture PDF embed skipped: PNG pixel count ${px} over budget.`);
-      } else {
-        capImg = await doc.embedJpg(sealedShot.bytes);
+      {
+        const pd = pageDefaultLine(a);
+        section("PAYMENT STARTING POINT", pd.headline, pd.state === "confirmed" ? NAVY : SOFT, [], pd.body);
       }
-    } catch (e) { console.warn("Capture embed skipped:", (e as Error)?.message); capImg = null; }
+      {
+        const line = marketCountLine(a);
+        section("OTHER LISTINGS READ", line.headline, line.state === "confirmed" ? NAVY : SOFT, [], line.body);
+      }
+      if (a.olderYears) {
+        const oyLine = olderYearsLine(a);
+        const rows = linesOf(oyLine);
+        section(oyLine.title, [oyLine.headline, oyLine.meta].filter(Boolean).join(" - "), oyLine.state === "confirmed" ? NAVY : SOFT, rows, rows.length ? undefined : oyLine.body, oyLine.note);
+      }
+      if (financeCoverageApplies(a)) {
+        const fcLine = financeCoverageLine(a);
+        const fr = linesOf(fcLine);
+        section(fcLine.title, [fcLine.headline, fcLine.meta].filter(Boolean).join(" - "), NAVY, fr, fr.length ? undefined : fcLine.body, fcLine.note);
+        const ipLine = insurancePremiumLine(a);
+        const ir = linesOf(ipLine);
+        section(ipLine.title, [ipLine.headline, ipLine.meta].filter(Boolean).join(" - "), NAVY, ir, ir.length ? undefined : ipLine.body, ipLine.note);
+      }
+      if (a.dealerLicence && a.dealerLicence.status) {
+        const Lc = a.dealerLicence, good = Lc.state === "valid";
+        section("DEALER LICENCE - AMVIC PUBLIC REGISTRY", String(Lc.status), good ? NAVY : LT.raise,
+          [Lc.legalName ? { k: "Legal name", v: String(Lc.legalName) } : null, Lc.licenceNumber ? { k: "Licence", v: String(Lc.licenceNumber), vf: monoB } : null, Lc.expiryDate ? { k: "Expiry", v: String(Lc.expiryDate) } : null, { k: "Source", v: "AMVIC public licensee registry" }].filter(Boolean) as any[],
+          undefined,
+          good ? "AMVIC is Alberta's regulator; every business selling vehicles in the province must hold a licence. This dealer's registry entry currently reads as licensed."
+            : "AMVIC's registry currently shows this status for the matched business. Records can lag and businesses do reapply, so this is not a verdict - but ask for the current licence number and status in writing before any deposit, and verify it yourself on AMVIC's public search.");
+      }
+      if (a.tradeInWidget && a.tradeInWidget.detected) {
+        section("TRADE-IN TOOL ON THIS LISTING", `Instant trade-in appraisal widget${a.tradeInWidget.vendor ? ` (${a.tradeInWidget.vendor})` : ""}`, NAVY, [],
+          "Its number is anchored to the wholesale side of the market (what dealers pay each other), it is non-binding, and it appears in exchange for your contact and vehicle details.",
+          "If you have a trade: settle this vehicle's price first; get the trade offer in writing on its own line - never one blended payment; and check retail listings for your own car before disclosing anything.");
+      }
+      if (trimRangeOk(a.trimRange)) {
+        const tr = a.trimRange;
+        const allExcl = tr.t.every((x: any) => Number(x.b) === 1);
+        const qpT = Number(a.quotedPrice) || 0;
+        const aboveN = qpT > 0 ? tr.t.filter((x: any) => qpT > Number(x.m)).length : 0;
+        const site = EMAIL_MAKE_SITE[tr.mk];
+        section("MSRP PER TRIM", `${tr.y} ${tr.mk} ${tr.md} - the manufacturer's price per trim${allExcl ? " (before freight & fees)" : ""}`, NAVY,
+          tr.t.slice(0, 12).map((x: any) => ({ k: x.p ? `${x.p} - ${x.n}` : String(x.n), v: `$${Number(x.m).toLocaleString("en-CA")}${Number(x.b) === 1 ? " + freight" : ""}`, vf: monoB })),
+          qpT > 0 ? `The asking price $${qpT.toLocaleString("en-CA")} sits above ${aboveN} of ${tr.t.length} published trim prices.${tr.t.length > 12 ? ` Showing 12 of ${tr.t.length} published trims.` : ""}` : undefined,
+          site ? "Source: confirm the range at " + site.replace(/^https:\/\/(www\.)?/, "") : undefined);
+      }
+      {
+        const dl = daysOnLotLine(a), sv = sameVinElsewhereLine(a), pm = priceMovesLine(a);
+        const rows = [
+          a.daysOnLot && dl && !(Number(a.daysOnLot.days) > 0) ? { k: "Days on lot", v: dl.line } : null,
+          sv ? { k: "Also advertised elsewhere", v: sv.line } : null,
+          pm ? { k: "Advertised price moves", v: pm.line } : null,
+        ].filter(Boolean) as any[];
+        if (rows.length) section("LISTING HISTORY", "", NAVY, rows);
+      }
+      drawFooter();
+    }
+
   }
-  // Page geometry hoisted ABOVE the footer text: a capture can embed fine yet
-  // slice to zero pages (extreme wide-thin aspect), and the footer may only
-  // promise pages that will actually render.
-  // 13 PAGES, AND DERIVED AT THE NARROWEST CAPTURE, NOT THE WIDEST.
-  //
-  // Raising what we CAPTURE without raising what we PRINT is half a two-step:
-  // the bigger captures would simply be truncated on paper instead. But the
-  // page count cannot be derived at 1920, because capScaledH above scales by
-  // the CAPTURE's own width -- so a NARROWER source image prints TALLER, and
-  // the narrow ones are exactly what the refit ladder produces on the tall
-  // pages that need the pages most. Deriving at 1920 would repeat, one
-  // constant over, the mistake this whole change is about.
-  //
-  // So derive at CAPTURE_MIN_WIDTH = 1024, the narrowest the ladder can emit.
-  // The tallest capture on record here is a 17,729 px capitalchev.ca page:
-  // scaledH = 17,729 * (483.28 / 1024) = 8,367 pt, and 1 + ceil((8367 -
-  // 629.89) / 695.89) = 13 pages. At 1920 the same page needs 7. Thirteen is
-  // the ceiling, not the typical count -- an ordinary 5,900 px listing prints
-  // in 4 -- and the image is embedded ONCE and drawn per page, so extra pages
-  // cost drawing instructions, not megabytes. capture.test.ts hand-copies
-  // these constants and test:capture-whole-page fails if the copy drifts.
-  const CAP_HEAD_FIRST = 100, CAP_HEAD_REST = 34, CAP_MAXP = 13;
-  const capScaledH = capImg ? capImg.height * (W / capImg.width) : 0;
-  const capU0 = PH - M * 2 - CAP_HEAD_FIRST, capUR = PH - M * 2 - CAP_HEAD_REST;
-  const capPages = capImg ? capturePageCount(capScaledH, capU0, capUR, CAP_MAXP) : 0;
-  // THE COLOPHON RESERVES ITS SPACE BEFORE IT WRITES, not after.
-  //
-  // This block used to run para(...) and THEN need(40) for the logo + ID line.
-  // para() reserves per LINE, so it can legally leave y as low as M+30 (86);
-  // need(40) then fires for any y under 126 and opens a brand-new page whose
-  // only ink is the logo and the ID. That is exactly what Vic saw on the 2025
-  // Mazda CX-90 report (LC-436A-B5C): page 4 of 5 blank but for the logo and
-  // "LOTCHECK - LC-436A-B5C - lotcheck.ca/verify".
-  //
-  // No section rendered empty -- every optional section is if-guarded and an
-  // untaken branch draws nothing. It is a PHASE bug, and it only shows on a
-  // SHORT report, because only then does the paragraph's last line land in the
-  // orphan band. That is why it survived: the reports we look at most are the
-  // long ones.
-  //
-  // Reserving the whole trailer up front means the paragraph and the mark it
-  // belongs to either share a page or move to the next one together. A block
-  // must not be able to open a page it cannot fill.
-  const colophonText = "Analyzed once, never stored on our end. This report's ID is a fingerprint of its own contents" + (issued ? " issued " + issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + " - change any figure and the ID changes, so it is tamper-evident. " + (verifyUrl ? "Use the link above (or the one in your email) to verify it at lotcheck.ca/verify - it recomputes the fingerprint and checks the signature, and nothing is stored on our end. " : "Verify it anytime at lotcheck.ca/verify using the link in this email. ") + (capImg && capPages > 0 ? "The sealed listing capture is printed on the pages that follow and attached as its own photo file. " : sealedShot ? "The sealed listing capture is attached to your email as its own photo file. " : "") + "Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google. Vehicle, price, and fee details were read from the dealer's page by an automated system, including AI reading the page or a screenshot when it couldn't be parsed directly - verify them against the original listing before you rely on them. LotCheck reviews the deal, not the car's history - pair it with a vehicle-history report before you buy.";
-  const COLOPHON_H = 40 + 30;                      // logo + ID line, per the draws below
-  {
-    const lines = Math.max(1, Math.ceil(String(colophonText).length / 110));
-    need(COLOPHON_H + lines * 11);
-  }
-  para(colophonText, { size: 8, color: FAINT, font: sans, lead: 3 });
-  { const w = 34; drawLogo(PW / 2 - w / 2, y - 2, w); }
-  y -= 30;
-  center("LOTCHECK  -  " + RID + "  -  lotcheck.ca/verify", y - 8, { size: 7.5, font: sansB, color: FAINT });
 
   // ---- SEALED LISTING CAPTURE — evidence pages ----
   // The full-page photo of the listing, printed into the PDF itself so the
