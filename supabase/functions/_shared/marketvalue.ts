@@ -75,6 +75,7 @@ export interface MarketValue {
   // window ("km") left out -- and how many other trims were read and set aside.
   pool?: MarketPoolRow[] | null;
   otherTrims?: number | null;
+  outKm?: number | null;        // how many the mileage window left out (the pool lists at most POOL_MAX)
 }
 
 export interface MarketPoolRow extends MarketSampleRow {
@@ -570,6 +571,7 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
       sample: sampleOf(kept, mileage),
       pool: poolOf(kept, pool.rows, (pool as any).outKm || [], mileage),
       otherTrims: Number((pool as any).otherTrims) || 0,
+      outKm: ((pool as any).outKm || []).length,
     };
     // CPO premium: only for a certified subject, against the NON-certified comps
     // in the same pool. computeCpoPremium is min-comps gated and returns a

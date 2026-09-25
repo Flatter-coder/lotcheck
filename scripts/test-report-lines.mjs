@@ -412,9 +412,9 @@ console.log("\n-- likeForLikePool + marketCompareLine --");
   const pl = poolOf(pool, [...pool, junk], [far], 48210);
   check("poolOf lists the kept set first, then the price outlier, then the mileage leaver, each tagged",
     pl.length === 6 && pl.slice(0, 4).every((r) => r.out === null) && pl[4].out === "price" && pl[4].price === 9000 && pl[5].out === "km" && pl[5].km === 197187, JSON.stringify(pl.map((r) => [r.price, r.out])));
-  const cp = canonicalReport({ ...full, marketValue: { ...mv6, sample: sampleRows, pool: pl, otherTrims: 11 } });
+  const cp = canonicalReport({ ...full, marketValue: { ...mv6, sample: sampleRows, pool: pl, otherTrims: 11, outKm: 3 } });
   check("v16 seals the pool compactly with its reasons, and how many other trims were set aside",
-    cp.marketValue.pool.length === 6 && cp.marketValue.pool[5].x === "km" && cp.marketValue.pool[0].x === null && cp.marketValue.ot === 11, JSON.stringify(cp.marketValue.pool));
+    cp.marketValue.pool.length === 6 && cp.marketValue.pool[5].x === "km" && cp.marketValue.pool[0].x === null && cp.marketValue.ot === 11 && cp.marketValue.okm === 3, JSON.stringify(cp.marketValue.pool));
   check("a report with no pool seals an empty list", Array.isArray(c.marketValue.pool) && c.marketValue.pool.length === 0, JSON.stringify(c.marketValue.pool));
   const viaVerify = marketCompareLine(verifyArg(c));
   check("the signed canonical round-trips the FULL sentence (make, model, province, dates, dealers)", JSON.stringify(viaVerify.lines) === JSON.stringify(am.lines) && viaVerify.light === am.light && viaVerify.title === am.title, JSON.stringify(viaVerify.lines));
