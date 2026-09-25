@@ -24,6 +24,20 @@ let threw = false; try { statusRow("vibes", "success"); } catch { threw = true; 
 check("an unknown catalogue is refused", threw);
 check("every row carries a sentence", CATALOGS.every((c) => statusRow(c, "failure").note.length > 0 && statusRow(c, "success").note.length > 0));
 
+console.log("APR (new): the legs' own guards decide");
+{
+  const { aprTally, legNames } = await import("./apr-tally.mjs");
+  const legs = legNames(readFileSync(new URL("../.github/workflows/catalog-rates-daily.yml", import.meta.url), "utf8"));
+  check("every rate leg is named, and GM is one of them", legs.length >= 17 && legs.includes("GM"), legs.join());
+  const all = aprTally(legs.map((n) => `${n}|success`), legs);
+  check("every make wrote fresh rates: green", all.state === "green" && all.covered === legs.length);
+  const some = aprTally(legs.filter((n) => n !== "GM").map((n) => `${n}|${n === "Ford" ? "failure" : "success"}`), legs);
+  check("a failed guard and a missing leg are both named, and it is amber", some.state === "amber" && /Ford/.test(some.note) && /GM \(no result\)/.test(some.note), some.note);
+  check("nothing refreshed: red", aprTally([], legs).state === "red");
+  const wf = readFileSync(new URL("../.github/workflows/catalog-rates-daily.yml", import.meta.url), "utf8");
+  check("each leg's tally is its fresh-rows guard, not whether the scrape crashed", /echo "\$\{\{ matrix\.name \}\}\|\$\{\{ steps\.verify\.outcome \}\}"/.test(wf) && /--makes="\$\{\{ matrix\.makes \}\}"/.test(wf));
+}
+
 console.log("one list, three places");
 const sql = readFileSync(new URL("../supabase/migrations/20260925_catalog_status.sql", import.meta.url), "utf8");
 const inSql = [...(sql.match(/catalog\s+text\s+not null check \(catalog in \(([^)]*)\)\)/) || [, ""])[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
