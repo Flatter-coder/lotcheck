@@ -56,6 +56,7 @@ import { dealerReputationPoint, pageAbsenceCopy } from "./point-state.ts";
 
 import { marketCompareLine } from "./report-lines.js";
 import { freightLine } from "./freight-line.ts";
+import { TRUSTED_APR_SOURCES } from "./deal.ts";
 
 // FOUR STATES, because green is a claim.
 //
@@ -378,16 +379,57 @@ function amvicBand(a) {
 }
 
 /* ── 05 financing math ── "no terms quoted" is a claim about their paperwork. */
+/* THE LOAN'S COST, IN DOLLARS.
+ *
+ * 2026-09-25, a used 2025 HR-V: 416 weekly payments of $111.28 at 7.99% over
+ * 96 months. Point 05 printed RECONCILES in green -- true, the arithmetic
+ * matched -- and said nothing about the $12,000 of interest inside it. Vic:
+ * "interest rate was not flag". We hold no official used-car rate to call 7.99%
+ * high, so the card states what the listing's OWN payment, rate and term cost,
+ * and raises a term of LONG_TERM_MONTHS or more (Vic, 09-25: flag 84+).
+ *
+ * The amount borrowed is derived from the same three figures (the present value
+ * of the payments at the rate), never from the asking price, so a financed fee
+ * or tax cannot be counted as interest. Only a TRUSTED rate (the dealer's feed or
+ * page text, deal.ts) may drive it -- a model's guess never prints a dollar
+ * figure. [[claims-must-stay-backed]] [[no-llm-generated-valuation-numbers]] */
+export const LONG_TERM_MONTHS = 84;
+export function loanCost(a) {
+  const f = a?.financing || {};
+  const pay = num(f.paymentAmount), term = num(f.termMonths);
+  const per = { weekly: 52, biweekly: 26, monthly: 12 }[f.paymentFrequency] || 0;
+  const d = a?.financeRates?.dealer;
+  const apr = d && d.apr != null && TRUSTED_APR_SOURCES.has(d.source) ? num(d.apr)
+    : TRUSTED_APR_SOURCES.has(f.source) ? num(f.rate) : 0;
+  if (!(pay > 0) || !(term > 0) || !per || !(apr > 0) || apr > 40) return null;
+  const n = Math.round((term / 12) * per), i = apr / 100 / per;
+  const borrowed = (pay * (1 - Math.pow(1 + i, -n))) / i;
+  const paid = pay * n;
+  return { n, pay, term, apr, freq: f.paymentFrequency, borrowed: Math.round(borrowed), paid: Math.round(paid), interest: Math.round(paid - borrowed), long: term >= LONG_TERM_MONTHS };
+}
+function loanSentence(a, lc) {
+  const yrs = lc.term % 12 ? `${(lc.term / 12).toFixed(1)} years` : `${lc.term / 12} years`;
+  const age = num(a?.year) > 0 ? new Date().getFullYear() - num(a.year) + lc.term / 12 : null;
+  return `About ${fmtMoney(lc.interest)} of this loan is interest: ${lc.n} ${lc.freq} payments of ${fmtMoney(lc.pay)} at ${lc.apr}% come to ${fmtMoney(lc.paid)} for about ${fmtMoney(lc.borrowed)} borrowed, from the listing's own payment, rate and term.` +
+    (lc.long ? ` The term is ${lc.term} months (${yrs})${age != null ? `; the car would be about ${Math.round(age)} years old at the last payment` : ""}.` : "");
+}
+
 function financeBand(a) {
   const fc = a?.financingCheck;
+  const lc = loanCost(a);
   if (fc?.checked) {
+    if (fc.consistent && lc?.long) return band("finance_math", "05", RAISE, `${fmtMoney(lc.interest)} INTEREST`,
+      `${loanSentence(a, lc)} ${fc.note || ""}`.trim());
     return fc.consistent
       ? band("finance_math", "05", CLEAR, "RECONCILES",
-          fc.note || "The advertised payments cross-check cleanly against the total obligation shown.",
+          lc ? `${loanSentence(a, lc)} ${fc.note || ""}`.trim() : (fc.note || "The advertised payments cross-check cleanly against the total obligation shown."),
           { source: "the listing's own payment, rate, term and total" })
       : band("finance_math", "05", RAISE, "DOESN'T ADD UP",
           fc.note || "The advertised payment, rate and term do not reconcile against the total shown. Ask for the full amount financed and the total of payments, in writing.");
   }
+  // Payment, rate and term but no total to reconcile against: the cost still
+  // stands on the listing's own figures.
+  if (lc) return band("finance_math", "05", lc.long ? RAISE : NOTED, `${fmtMoney(lc.interest)} INTEREST`, loanSentence(a, lc));
   const rf = a?.referenceFinancing?.atAsking;
   // Arithmetic WE did because the dealer published nothing to check. Green here
   // would say their figures reconciled. There were no figures.

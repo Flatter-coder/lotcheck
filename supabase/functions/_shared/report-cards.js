@@ -15,7 +15,7 @@
 // card comes from a builder that already owns it. The suggestions never assume
 // the buyer will sign ([[no-assume-the-client-signs]]) and never accuse the
 // dealer ([[no-accusation-language]]).
-import { reportBands, RAISE, CLEAR, NOTED, UNCHECKED } from "./report-bands.js";
+import { reportBands, loanCost, RAISE, CLEAR, NOTED, UNCHECKED } from "./report-bands.js";
 import { daysOnLotLine, fmtMoney, fmtDateEn } from "./report-lines.js";
 import { freightLine } from "./freight-line.ts";
 import { aprRefusal } from "./apr-reference.ts";
@@ -60,8 +60,8 @@ const SUGGEST = new Map([
     unchecked: "Look the dealer up on AMVIC's public registry.",
   }],
   ["finance_math", {
-    raise: "Ask for the amortisation schedule in writing.",
-    clear: "Payments reconcile. Nothing to raise.",
+    raise: (a) => (loanCost(a)?.long && !(a?.financingCheck?.checked && a.financingCheck.consistent === false) ? "Ask for the same car over a shorter term, and compare the total interest in writing." : "Ask for the amortisation schedule in writing."),
+    clear: "Payments reconcile. Compare the interest with your own bank's quote.",
     noted: "Ask for the rate, term and total cost in writing.",
     unchecked: "Ask for the rate, term and total cost in writing.",
   }],

@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-09-25b";  // 25b: the 4-page report replaces the old detail pages -- 1 cards, 2 compare (sealed listings, market line), 3 shortlist (sealed pool, by city), 4 summary + thank-you + disclosures, 5 details (fee breakdown, recalls, extras, insurance, AMVIC, payment default); a finance-tied price leads page 1. 25a: a used car too thin to compare says so on point 01, never "MSRP NOT MATCHED". 24a: the Hub & Spoke redesign -- page 1 is thirteen cards around the car, page 2 the summary and thank-you; the full detail follows unchanged.
+const PDF_BUILDER_VER = "2026-09-25c";  // 25c: point 05 states what the loan costs in dollars (the listing's own payment, trusted rate and term) and raises a term of 84 months or more. 25b: 25b: the 4-page report replaces the old detail pages -- 1 cards, 2 compare (sealed listings, market line), 3 shortlist (sealed pool, by city), 4 summary + thank-you + disclosures, 5 details (fee breakdown, recalls, extras, insurance, AMVIC, payment default); a finance-tied price leads page 1. 25a: a used car too thin to compare says so on point 01, never "MSRP NOT MATCHED". 24a: the Hub & Spoke redesign -- page 1 is thirteen cards around the car, page 2 the summary and thank-you; the full detail follows unchanged.
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
