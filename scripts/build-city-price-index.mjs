@@ -27,6 +27,7 @@
 //   node scripts/build-city-price-index.mjs                # writes; needs SUPABASE_* env
 import { pathToFileURL } from "node:url";
 import { pickTrimMsrp } from "../supabase/functions/_shared/trim-match.js";
+import { buildCatalogIndex, classifyNewCar, tallyNewCars, makerVsDealerStatus, isSourceReason } from "./lib/maker-match.mjs";
 
 const DRY = process.argv.includes("--dry-run");
 
@@ -297,6 +298,66 @@ export function computeProvinceRead(provRows, { minListings = PROVINCE_MIN_LISTI
 
 // ---- orchestration -----------------------------------------------------
 
+// The run log's account of every live new car: the reason tally, each make's
+// share, and for every reason the model groups behind it with the dealer's own
+// trim words beside what our catalogue holds -- enough to see WHICH gap to fix
+// next without a database session.
+function printAccounting(items, tally, catalog, idx) {
+  const pad = (s, n) => String(s).padEnd(n);
+  console.log(`\nACCOUNTED FOR: ${tally.n} live new cars -- ${tally.matched} matched, ${tally.source} source's gap, ${tally.ours} our gap.`);
+  for (const [k, v] of Object.entries(tally.reasons).sort((a, b) => b[1] - a[1])) {
+    console.log(`  ${pad(k, 30)} ${String(v).padStart(6)}  ${isSourceReason(k) ? "source" : "OURS"}`);
+  }
+  const makes = new Map();
+  for (const { l, r } of items) {
+    const k = String(l.make || "?");
+    const m = makes.get(k) || { n: 0, matched: 0, reasons: {} };
+    m.n++;
+    if (r.matched) m.matched++; else m.reasons[r.reason] = (m.reasons[r.reason] || 0) + 1;
+    makes.set(k, m);
+  }
+  const catByMake = new Map();
+  for (const c of catalog) {
+    const k = String(c.make || "").toLowerCase();
+    const m = catByMake.get(k) || { rows: 0, trimmed: 0, drive: 0, fuel: 0, years: new Set(), fetched: null };
+    m.rows++; if (String(c.trim || "").trim()) m.trimmed++; if (c.drivetrain) m.drive++; if (c.fuel_type) m.fuel++;
+    m.years.add(c.year); if (c.fetched_at && (!m.fetched || c.fetched_at > m.fetched)) m.fetched = c.fetched_at;
+    catByMake.set(k, m);
+  }
+  console.log("\nBY MAKE (cars matched/total | catalogue rows, trimmed, drivetrain, fuel, years, newest fetch):");
+  for (const [k, m] of [...makes].sort((a, b) => b[1].n - a[1].n)) {
+    const c = catByMake.get(k.toLowerCase());
+    const top = Object.entries(m.reasons).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([r, v]) => `${r}=${v}`).join(" ");
+    console.log(`  ${pad(k, 16)} ${String(m.matched).padStart(5)}/${String(m.n).padEnd(5)} | ` +
+      (c ? `${c.rows} rows, ${c.trimmed} trimmed, ${c.drive} drive, ${c.fuel} fuel, ${[...c.years].sort().join("/")}, ${String(c.fetched || "never").slice(0, 10)}` : "no catalogue rows") +
+      `  ${top}`);
+  }
+  const byReason = new Map();
+  for (const { l, r } of items) {
+    if (r.matched) continue;
+    const g = `${l.year} ${l.make} ${l.model}`;
+    if (!byReason.has(r.reason)) byReason.set(r.reason, new Map());
+    const groups = byReason.get(r.reason);
+    const e = groups.get(g) || { n: 0, trims: new Map(), l, whys: new Set() };
+    e.n++; e.trims.set(l.trim || "(none)", (e.trims.get(l.trim || "(none)") || 0) + 1); if (r.why) e.whys.add(r.why);
+    groups.set(g, e);
+  }
+  for (const [reason, groups] of [...byReason].sort((a, b) => (tally.reasons[b[0]] || 0) - (tally.reasons[a[0]] || 0))) {
+    console.log(`\n[${reason}] ${tally.reasons[reason]} cars, ${groups.size} model groups`);
+    for (const [g, e] of [...groups].sort((a, b) => b[1].n - a[1].n).slice(0, 14)) {
+      const trims = [...e.trims].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t, n]) => `"${t}"x${n}`).join(", ");
+      console.log(`  ${String(e.n).padStart(4)}  ${g}  trims: ${trims}${e.whys.size ? `  why: ${[...e.whys].join("/")}` : ""}`);
+      const ymm = idx.byYMM.get(`${e.l.year}|${String(e.l.make || "").toLowerCase()}|${String(e.l.model || "").toLowerCase()}`);
+      if (ymm) {
+        console.log(`        catalogue: ${ymm.slice(0, 12).map((c) => `${c.trim || "(no trim)"}${c.drivetrain ? "/" + c.drivetrain : ""}${c.fuel_type ? "/" + c.fuel_type : ""} $${c.msrp}`).join(" | ")}`);
+      } else {
+        const mm = idx.models.get(String(e.l.make || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim());
+        if (mm) console.log(`        catalogue models for the make: ${[...mm.values()].slice(0, 30).map((x) => `${x.name}[${[...x.years].sort().join("/")}]`).join(", ")}`);
+      }
+    }
+  }
+}
+
 async function fetchAll(url, headers, table, params) {
   const rows = [];
   const PAGE = 1000;
@@ -328,7 +389,7 @@ async function main() {
   const [dealers, allCars, catalog] = await Promise.all([
     fetchAll(url, headers, "dealer_source", "select=id,city,province,active&active=eq.true&group_feed=is.false"),
     fetchAll(url, headers, "rpc/fn_listing_once", "select=vin,dealer_id,dealer_ids,year,make,model,trim:trim_name,list_price,sale_price,msrp,updated_at,condition&condition=eq.new&order=vin"),
-    fetchAll(url, headers, "msrp_catalog", "select=year,make,model,trim,msrp,fuel_type,drivetrain,attrs,price_basis,all_in_price"),
+    fetchAll(url, headers, "msrp_catalog", "select=year,make,model,trim,msrp,fuel_type,drivetrain,attrs,price_basis,all_in_price,fetched_at"),
   ]);
   const dealerCity = new Map(dealers.map((d) => [d.id, d.city]));
   const dealerProvince = new Map(dealers.map((d) => [d.id, d.province]));
@@ -349,6 +410,8 @@ async function main() {
     });
   }
   console.log(`  ${dealers.length} active dealers, ${listings.length} live new cars, ${catalog.length} msrp_catalog rows.`);
+
+  const catalogIdx = buildCatalogIndex(catalog);
 
   // Group msrp_catalog candidates by year|make|model so each listing's match
   // only searches its own model's trim ladder.
@@ -414,16 +477,19 @@ async function main() {
   console.log(`  matched ${matched} cars to a confident MSRP, ${unmatched} unmatched/low-confidence, ${noCity} with no active dealer city, ${twoCities} listed in two cities (no city index).`);
   // THE DAILY REPORT'S "manufacturer vs Alberta dealer prices" check mark. This
   // index IS that comparison -- every live new car measured against its maker's
-  // own figure -- so its coverage is how many live new cars could be measured.
-  // Green only when every one of them was; unmatched cars are our gap.
+  // own figure. Every car is ACCOUNTED FOR (scripts/lib/maker-match.mjs):
+  // matched, or held back for a named reason that says whose gap it is. Green
+  // only when every held-back car is the source's; one of ours keeps it amber.
+  // Counted over EVERY live new car, not only those with a single city -- the
+  // old tally dropped cars listed in two cities from both of its numbers.
+  const accountedFor = listings.map((l) => ({ l, r: classifyNewCar(l, catalogIdx) }));
+  const tally = tallyNewCars(accountedFor.map((x) => x.r));
+  const status = makerVsDealerStatus(tally);
+  printAccounting(accountedFor, tally, catalog, catalogIdx);
+  console.log(`\n  maker vs dealer: ${status.state.toUpperCase()} -- ${status.note}`);
   if (process.env.CATALOG_STATUS_OUT) {
     const { writeFileSync } = await import("node:fs");
-    const n = listings.length;
-    writeFileSync(process.env.CATALOG_STATUS_OUT, JSON.stringify({
-      state: matched === 0 ? "red" : matched >= n ? "green" : "amber",
-      covered: matched, of_total: n, unit: "new cars measured against the maker's MSRP",
-      note: `${matched.toLocaleString("en-CA")} of ${n.toLocaleString("en-CA")} live new cars at Alberta dealers matched to a confident manufacturer MSRP; ${unmatched.toLocaleString("en-CA")} could not be matched to an exact trim yet.`,
-    }));
+    writeFileSync(process.env.CATALOG_STATUS_OUT, JSON.stringify(status));
   }
   if (noCityDealers.size) {
     console.warn(`  ${noCityDealers.size} active dealer(s) have NO city and their listings are excluded entirely:`);

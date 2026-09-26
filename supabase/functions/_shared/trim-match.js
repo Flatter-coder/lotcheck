@@ -221,18 +221,42 @@ function rowIdentifiesTheCar(r, s, common, pool) {
   return mine.some((t) => want.includes(t));
 }
 
-function rowConfirmsConfig(r, s) {
+// WHY a row cannot confirm the stated configuration, or null when it can.
+// rowConfirmsConfig is exactly `configGap(...) === null`; the reason exists so
+// a coverage report can say WHICH half failed instead of "not exact".
+function configGap(r, s) {
   const stated = statedDrive(s);
   const statedFuel = s && s.fuelType ? fuelKind(s.fuelType) : null;
   if (statedFuel) {
     // The row must SAY which powertrain it is. A null fuel_type reads as "gas"
     // to fuelKind, which would let an unlabelled row confirm a gas listing it
     // knows nothing about — so the raw column has to be present too.
-    if (!r || r.fuel_type == null || String(r.fuel_type).trim() === "") return false;
-    if (fuelKind(r.fuel_type) !== statedFuel) return false;
+    if (!r || r.fuel_type == null || String(r.fuel_type).trim() === "") return "fuel_unlabelled";
+    if (fuelKind(r.fuel_type) !== statedFuel) return "fuel_differs";
   }
-  if (!stated) return true;            // nothing claimed -> nothing to confirm
-  return rowDrive(r) === stated;       // the row must pin the same configuration
+  if (!stated) return null;            // nothing claimed -> nothing to confirm
+  const rd = rowDrive(r);
+  if (rd === stated) return null;      // the row must pin the same configuration
+  return rd ? "drive_differs" : "drive_unpinned";
+}
+
+function rowConfirmsConfig(r, s) {
+  return configGap(r, s) === null;
+}
+
+// The first reason a winning row is not "exact", in the same order the basis
+// test below evaluates them. Annotation only: it never changes the basis, the
+// figure or the row — callers that ignore it see exactly what they saw before.
+function notExactBecause(r, s, common, pool, { checkLadder = true } = {}) {
+  if (!rowIdentifiesTheCar(r, s, common, pool)) {
+    return String(r && r.trim == null ? "" : (r && r.trim) || "").trim() ? "row_names_other_trim" : "row_names_no_trim";
+  }
+  const cfg = configGap(r, s);
+  if (cfg) return cfg;
+  if (priceImplausible(r.msrp, s.quotedPrice)) return "price_implausible";
+  if (checkLadder && trimNameIsAmbiguous(pool, r)) return "trim_name_duplicated";
+  if (checkLadder && hasMoreSpecificSibling(pool, r, common)) return "more_specific_sibling";
+  return null;
 }
 
 // PRICE PLAUSIBILITY CEILING — same failure class as rowConfirmsConfig, one
@@ -322,7 +346,9 @@ export function pickTrimMsrp(rows, sig) {
     const exact = rowIdentifiesTheCar(r, s, new Set(), [r])
       && rowConfirmsConfig(r, s)
       && !priceImplausible(r.msrp, s.quotedPrice);
-    return { msrp: Number(r.msrp), trim: r.trim || null, basis: exact ? "exact" : "starting_at", score: 0 };
+    const out = { msrp: Number(r.msrp), trim: r.trim || null, basis: exact ? "exact" : "starting_at", score: 0 };
+    if (!exact) out.why = notExactBecause(r, s, new Set(), [r], { checkLadder: false });
+    return out;
   }
 
   // 1) Fuel partition — never cross hybrid / gas / bev / phev.
@@ -450,7 +476,7 @@ export function pickTrimMsrp(rows, sig) {
   // No usable signal at all -> honest "starting at" = cheapest in the fuel pool.
   if (top.sc <= 0 && wantTokens.size === 0 && !wantDrive && feats.size === 0) {
     const base = pool.slice().sort((a, b) => Number(a.msrp) - Number(b.msrp))[0];
-    return { msrp: Number(base.msrp), trim: base.trim || null, basis: "starting_at", score: 0 };
+    return { msrp: Number(base.msrp), trim: base.trim || null, basis: "starting_at", score: 0, why: "no_trim_signal" };
   }
 
   // Clear winner if it leads by >=2, or the runner-up's MSRP is within $500
@@ -478,11 +504,13 @@ export function pickTrimMsrp(rows, sig) {
       && !priceImplausible(top.r.msrp, s.quotedPrice)
       && !trimNameIsAmbiguous(pool, top.r)
       && !hasMoreSpecificSibling(pool, top.r, common)) ? "exact" : "starting_at";
-    return { msrp: Number(top.r.msrp), trim: top.r.trim || null, basis, score: top.sc };
+    const out = { msrp: Number(top.r.msrp), trim: top.r.trim || null, basis, score: top.sc };
+    if (basis !== "exact") out.why = notExactBecause(top.r, s, common, pool);
+    return out;
   }
 
   // Genuinely ambiguous between materially different trims -> cheapest of the tie,
   // labelled starting_at so the report never presents a guess as the exact MSRP.
   const tied = scored.filter((x) => x.sc === top.sc).sort((a, b) => Number(a.r.msrp) - Number(b.r.msrp));
-  return { msrp: Number(tied[0].r.msrp), trim: tied[0].r.trim || null, basis: "starting_at", score: top.sc };
+  return { msrp: Number(tied[0].r.msrp), trim: tied[0].r.trim || null, basis: "starting_at", score: top.sc, why: "tie" };
 }
