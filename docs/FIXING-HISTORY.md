@@ -27,6 +27,39 @@ the next instance.
 ---
 ---
 
+## 2026-09-26 — a series-level powertrain tag froze 57 MSRP rows and stored gas trucks as Hybrid
+
+### What happened
+The daily MSRP refresh stayed red: Toyota 32 of 121 rows and Lexus 23 of 74 not
+rewritten. Root cause: the Toyota/Lexus feed tags powertrain per SERIES
+("Hybrid Available"), so every gas trim of a mixed line came back Hybrid. Where
+a marked sibling existed (4Runner / 4Runner Hybrid, Corolla Cross, Lexus NX,
+RX) the powertrain guard correctly refused the line, and the hand-captured rows
+behind it aged in place. Where no sibling existed, the mis-tag was written: all
+10 gas Tacoma trims, 10 gas Tundra, 4 Highlander and 2 Grand Highlander sat in
+`msrp_catalog` as Hybrid. Two smaller holes kept more rows frozen: the
+supersede key was case-sensitive, so the feed's "LIMITED" $52,000 never
+replaced the captured "Limited" $52,350 (which carried $350 of paint); and
+"RAV4 Hybrid" 2026 was a one-time migration copy of the RAV4 rows, never
+refreshed. The Lexus RX/TX overrides re-asserted a fixed 08-26 date every run.
+
+### Fix
+104f7c7: powertrain is read from each model's own record (engine code, then
+Toyota's own naming: "i-FORCE MAX"/"hybrid" vs bare "i-FORCE"); `catKey` is
+case/space-insensitive; the RAV4 Hybrid alias is re-derived from live rows every
+run; an override retires row by row where the feed agrees to the dollar (RX 7/7,
+TX 350 6/10 on the 09-26 dry run). Disagreements keep the verified figure and log.
+
+### Guard
+`test:tci-overrides` (63 checks) pins the engine-code and naming rules, the
+alias re-derivation and its exclusion from the sibling proof, the self-retiring
+override (agree, disagree, missing trim), and the case-insensitive key.
+Rows the feed does not publish at all (2026 4Runner Hybrid, Corolla Cross
+Hybrid, the 2026 Crown after the feed moved to 2027) are still captured-only and
+still read stale -- correctly, until they are re-read from the maker's page.
+
+---
+
 ## 2026-09-25 — the car-once fix stopped the price index and the daily report
 
 **Shapes:** One-surface fix · Green signal, no check
