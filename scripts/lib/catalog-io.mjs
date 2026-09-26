@@ -63,7 +63,12 @@ export function gateMsrpRows(rows, make) {
 // exactly as the hand-seeded drivetrain values were before this list existed.
 export const CARRY_FORWARD = ["drivetrain", "attrs", "price_basis", "source_url", "fuel_type"];
 
-export const catKey = (r) => `${r.year}|${r.model}|${r.trim ?? ""}`;
+// Case and spacing are not identity: the feed writes "LIMITED" where our
+// capture wrote "Limited", and a case-sensitive key kept both -- the captured
+// 2026 RAV4 Limited at $52,350 (it carried $350 of paint) beside the feed's
+// $52,000, never superseded (2026-09-26).
+const keyPart = (s) => String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+export const catKey = (r) => `${r.year}|${keyPart(r.model)}|${keyPart(r.trim)}`;
 
 // Pure half, exported so it can be tested without a database.
 //
