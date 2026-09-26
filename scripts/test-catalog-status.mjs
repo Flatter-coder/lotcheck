@@ -38,6 +38,13 @@ console.log("APR (new): the legs' own guards decide");
   check("each leg's tally is its fresh-rows guard, not whether the scrape crashed", /echo "\$\{\{ matrix\.name \}\}\|\$\{\{ steps\.verify\.outcome \}\}"/.test(wf) && /--makes="\$\{\{ matrix\.makes \}\}"/.test(wf));
 }
 
+console.log("inventory: green means every dealer accounted for (Vic 09-25, A)");
+{
+  const crawl = readFileSync(new URL("./crawl-alberta-inventory.mjs", import.meta.url), "utf8");
+  check("accounted = read today + on record as refusing us", /\.eq\("last_direct_status", "refused"\)/.test(crawl) && /const accounted = ok \+ refused;/.test(crawl));
+  check("green only when every catalogued dealer site is accounted for", /accounted >= ofTotal \? "green" : "amber"/.test(crawl) && !/ok \/ ofTotal >= 0\.9/.test(crawl));
+}
+
 console.log("one list, three places");
 const sql = readFileSync(new URL("../supabase/migrations/20260925_catalog_status.sql", import.meta.url), "utf8");
 const inSql = [...(sql.match(/catalog\s+text\s+not null check \(catalog in \(([^)]*)\)\)/) || [, ""])[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);

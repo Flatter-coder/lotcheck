@@ -786,16 +786,25 @@ upserted=${totals.upserted}
   // Alberta" is the target, so coverage is measured against every dealer site
   // we have catalogued, not against the few we can read -- 31 of 31 would be a
   // green that hides 1,600 dealers. [[three-state-check-marks]]
+  //
+  // GREEN MEANS EVERY DEALER IS ACCOUNTED FOR (Vic 2026-09-25, option A): read
+  // today, or on record as refusing our crawler (dealer_source.last_direct_status,
+  // written by discover-dealer-feeds.mjs). A site on a platform we cannot read
+  // yet, or one that did not answer, is OUR gap and keeps it amber. "No
+  // inventory online" joins the accounted set only once it is established per
+  // site, never inferred from a missing feed. Refusals are never evaded.
   if (process.env.CATALOG_STATUS_OUT && !DRY && supabase) {
     const ok = totals.dealers - totals.failed;
     const { count } = await supabase.from("dealer_source").select("id", { count: "exact", head: true });
-    const ofTotal = Number(count) || null;
-    const state = !(totals.upserted > 0) ? "red" : ofTotal && ok / ofTotal >= 0.9 ? "green" : "amber";
+    const { count: refusedN } = await supabase.from("dealer_source").select("id", { count: "exact", head: true }).eq("last_direct_status", "refused");
+    const ofTotal = Number(count) || null, refused = Number(refusedN) || 0;
+    const accounted = ok + refused;
+    const state = !(totals.upserted > 0) ? "red" : ofTotal && accounted >= ofTotal ? "green" : "amber";
     const note = !(totals.upserted > 0)
       ? "The crawl wrote no observations, so no car on sale was refreshed."
-      : `${ok} dealer${ok === 1 ? "" : "s"} read, ${totals.rows.toLocaleString("en-CA")} cars on sale refreshed` +
-        (ofTotal ? `; ${ofTotal.toLocaleString("en-CA")} Alberta dealer sites are catalogued, and the rest are on platforms we cannot read yet or refuse our crawler.` : ".");
-    writeFileSync(process.env.CATALOG_STATUS_OUT, JSON.stringify({ state, rows_total: totals.rows, covered: ok, of_total: ofTotal, unit: "dealer sites", note }));
+      : `${ok} dealer${ok === 1 ? "" : "s"} read (${totals.rows.toLocaleString("en-CA")} cars on sale refreshed) · ${refused} refuse our crawler` +
+        (ofTotal ? ` · ${Math.max(0, ofTotal - accounted).toLocaleString("en-CA")} not yet accounted for (platforms we cannot read yet, or no answer), of ${ofTotal.toLocaleString("en-CA")} Alberta dealer sites.` : ".");
+    writeFileSync(process.env.CATALOG_STATUS_OUT, JSON.stringify({ state, rows_total: totals.rows, covered: accounted, of_total: ofTotal, unit: "dealer sites accounted for", note }));
     if (process.env.CATALOG_STATUS_FEES_OUT) {
       // Dealer fees: a dealer counts once its fee statement was READ -- whether
       // it publishes fees or states none. A dealer on a platform whose data
