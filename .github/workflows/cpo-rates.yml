@@ -1,0 +1,39 @@
+# Used-vehicle APR: manufacturers' certified pre-owned finance rates, read from
+# their own Canadian sites (scripts/scrape-cpo-rates.mjs). Vic 2026-09-25: every
+# catalogue at 6am and midnight Calgary; 06 and 12 UTC are midnight and 6am MDT.
+# Several programs end on the last day of the month, so a twice-daily read is
+# what keeps an expired rate from being quoted into October.
+name: Used APR (CPO rates)
+
+on:
+  schedule:
+    - cron: "17 6,12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cpo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Read the makers' CPO rate pages
+        id: read
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CATALOG_STATUS_OUT: ${{ runner.temp }}/apr-used.json
+        run: node scripts/scrape-cpo-rates.mjs
+      # The daily report's check mark (20260925_catalog_status.sql). always():
+      # a failed refresh is recorded red, never left showing yesterday's green.
+      - name: Record catalogue status
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/record-catalog-status.mjs --catalog apr_used --outcome ${{ steps.read.outcome }} --summary "${{ runner.temp }}/apr-used.json" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
