@@ -41,11 +41,16 @@ import { partitionByScope } from "./lib/crawl-blocklist.mjs";
 import { politeFetch, requestLedger } from "./lib/polite-fetch.mjs";
 import { extractConvertusVmsRoot } from "../supabase/functions/_shared/convertus-vms.js";
 import { sm360VehicleFees } from "../supabase/functions/_shared/sm360-fees.js";
+import { parseD2cListing, d2cPageUrl } from "./lib/d2c-inventory.mjs";
+import { extractD2cVdpVehicle } from "../supabase/functions/_shared/d2c-vdp.js";
+import { normalizeFeeLabel } from "../supabase/functions/_shared/fee-vocab.ts";
 import { pathToFileURL } from "node:url";
 import { appendFileSync, writeFileSync } from "node:fs";
 
 const DRY = process.argv.includes("--dry-run");
 const HOST_ARG = (() => { const i = process.argv.indexOf("--host"); return i > -1 ? process.argv[i + 1] : null; })();
+// Dry runs without a database: which platform the --host dealer is on (default sm360).
+const PLATFORM_ARG = (() => { const i = process.argv.indexOf("--platform"); return i > -1 ? process.argv[i + 1] : null; })();
 // A RUN THAT CANNOT FINISH NEVER WRITES A SECOND OBSERVATION.
 //
 // This walked EVERY active dealer with no bound. On 2026-08-18 that took six
@@ -390,7 +395,7 @@ export function feeRows(dealerId, statements, day) {
     // the fact, never averaged across.
     const condition = st.condition === "new" || st.condition === "used" ? st.condition : "unknown";
     const k = `${condition}|${st.basis}|${f.name}|${f.amount}`;
-    const cur = by.get(k) || { dealer_id: dealerId, observed_on: day, condition, basis: st.basis, fee_name: f.name, fee_label: f.feeLabel, amount: f.amount, vehicles: 0, source: "sm360_feed" };
+    const cur = by.get(k) || { dealer_id: dealerId, observed_on: day, condition, basis: st.basis, fee_name: f.name, fee_label: f.feeLabel, amount: f.amount, vehicles: 0, source: st.source || "sm360_feed" };
     cur.vehicles++;
     by.set(k, cur);
   }
@@ -473,6 +478,33 @@ async function crawlJsonLdSection(host, section) {
 // Confirmed live 2026-08-18: Rainbow Ford. The whole section's inventory sits
 // in one `vehicleArray = {...}` object on the /new/ or /used/ page itself --
 // no further pagination observed, so this is a single fetch per section.
+// ── d2c (D2C Media) ────────────────────────────────────────────────────────
+// Walks the section page by page through the site's own server-rendered pager
+// (lib/d2c-inventory.mjs explains the filter code). Featured cards repeat on
+// every page, so a page is new only for VINs not seen yet; a page that adds
+// none is the end. Hitting the cap marks the crawl partial (no delisting).
+export async function crawlD2cSection(host, section, { fetcher = fetchHtml, delayMs } = {}) {
+  const cond = sectionCondition(section);
+  const rows = [], seen = new Set();
+  let partial = false;
+  for (let page = 0; page < PAGE_CAP; page++) {
+    if (page > 0) await sleep(delayMs ?? effectiveDelayMs);
+    let html;
+    try { html = await fetcher(d2cPageUrl(host, cond, page)); }
+    catch (e) {
+      if (page === 0) throw e;
+      console.warn(`    ${section}: page ${page + 1} failed (${e.message}) -- keeping ${rows.length} rows, partial`);
+      partial = true;
+      break;
+    }
+    const fresh = parseD2cListing(html, cond).filter((r) => !seen.has(r.vin));
+    if (!fresh.length) break;
+    for (const r of fresh) { seen.add(r.vin); rows.push(r); }
+    if (page === PAGE_CAP - 1) { partial = true; console.warn(`    ${section}: page cap ${PAGE_CAP} reached -- partial`); }
+  }
+  return { rows, partial };
+}
+
 async function crawlEdealerSection(host, section) {
   const html = await fetchHtml(`${host}/${section}/`);
   return { rows: extractEdealerVehicles(html), partial: false };
@@ -501,6 +533,7 @@ function robotsPathsFor(platform, section) {
   // URL is re-checked individually inside discoverConvertusVdps.
   if (platform === "convertus") return ["/sitemap.xml", "/vehicles/"];
   if (platform === "sm360") return [`/en/${section}/api/listing`];
+  if (platform === "d2c") return ["/inventory.html"];
   return [`/${section}/`]; // jsonld_itemlist + edealer
 }
 
@@ -547,7 +580,7 @@ async function main() {
 
   if (DRY) {
     dealers = HOST_ARG
-      ? [{ id: 0, host: HOST_ARG, name: HOST_ARG, platform: "sm360", sections: ["new-inventory", "used-inventory"] }]
+      ? [{ id: 0, host: HOST_ARG, name: HOST_ARG, platform: PLATFORM_ARG || "sm360", sections: PLATFORM_ARG && PLATFORM_ARG !== "sm360" ? ["new", "used"] : ["new-inventory", "used-inventory"] }]
       : [
           { id: 0, host: "https://www.tazaparkvw.com", name: "Taza Park Volkswagen", platform: "sm360", sections: ["used-inventory"] },
           { id: 0, host: "https://www.denhamford.ca", name: "Denham Ford", platform: "convertus", platform_id: "1285", sections: ["new", "used"] },
@@ -563,7 +596,7 @@ async function main() {
     supabase = createClient(url, key);
     let q = supabase
       .from("dealer_source").select("id,host,name,city,province,sections,platform,platform_id,last_ok_at")
-      .eq("active", true).in("platform", ["sm360", "convertus", "jsonld_itemlist", "edealer"])
+      .eq("active", true).in("platform", ["sm360", "convertus", "jsonld_itemlist", "edealer", "d2c"])
       // Never crawled first, then longest since a successful crawl. That is
       // what makes a bounded run fair instead of always re-reading the same
       // head of the list.
@@ -619,13 +652,15 @@ async function main() {
     const condState = { new: { crawled: false, ok: true }, used: { crawled: false, ok: true } };
     let failed = false, partial = false, refusedWhy = null;
     const feeStatements = [];
+    const d2cFeeSamples = [];
 
     // Each platform names its sections differently: SM360 uses the URL segment
     // (new-inventory), everything else uses the plain new/used it links to.
     const isCvt = d.platform === "convertus";
     const isJsonLd = d.platform === "jsonld_itemlist";
     const isEdealer = d.platform === "edealer";
-    const sections = d.sections?.length ? d.sections : (isCvt || isJsonLd || isEdealer ? ["new", "used"] : ["new-inventory", "used-inventory"]);
+    const isD2c = d.platform === "d2c";
+    const sections = d.sections?.length ? d.sections : (isCvt || isJsonLd || isEdealer || isD2c ? ["new", "used"] : ["new-inventory", "used-inventory"]);
     // (convertus no longer needs platform_id — it enumerates VDPs from the
     // dealer's sitemap, not the platform-keyed ajax endpoint.)
 
@@ -656,6 +691,7 @@ async function main() {
         result = isCvt ? await crawlConvertus(d.host, section, rb.robots)
           : isJsonLd ? await crawlJsonLdSection(d.host, section)
           : isEdealer ? await crawlEdealerSection(d.host, section)
+          : isD2c ? await crawlD2cSection(d.host, section)
           : await crawlSection(d.host, section);
       } catch (e) {
         console.warn(`    ${section}: FAILED (${e.message})`);
@@ -672,6 +708,7 @@ async function main() {
         continue;
       }
       result.rows = gate.rows;
+      if (isD2c) { const u = result.rows.find((r) => r.vdp_url)?.vdp_url; if (u) d2cFeeSamples.push({ cond, url: u }); }
       if (result.fees) {
         const kept = new Set(result.rows.map((r) => r.vin));
         for (const f of result.fees) if (kept.has(f.vin)) feeStatements.push(...f.statements.map((st) => ({ ...st, condition: cond })));
@@ -729,7 +766,25 @@ async function main() {
     // dealer states it charges, in its own words, and on how many of today's
     // cars. Only a platform whose data carries the dealer's fee statement is
     // counted as read for fees; the rest are our gap, not "no fees".
-    if (d.platform === "sm360" && !failed) {
+    // D2C lists no fees on its listing page; its vehicle pages itemise them
+    // (_shared/d2c-vdp.js, customFeesList). A dealer's fee ladder is set per
+    // condition, so ONE vehicle page per condition is read -- two requests, not
+    // hundreds -- and each fee counts one car. A page that itemises none is a
+    // fee statement read ("none itemised"), not our gap.
+    let d2cFeesRead = false;
+    if (isD2c && !failed && !DRY) {
+      for (const { cond, url } of d2cFeeSamples) {
+        await sleep(effectiveDelayMs);
+        try {
+          const v = extractD2cVdpVehicle(await fetchHtml(url));
+          if (!v) continue;
+          d2cFeesRead = true;
+          feeStatements.push({ basis: "cash", condition: cond, source: "d2c_vdp",
+            fees: (v.dealerFees || []).map((f) => ({ name: f.name, amount: f.amount, feeLabel: normalizeFeeLabel(f.name) })) });
+        } catch (e) { console.warn(`    fee sample (${cond}) skipped: ${e.message}`); }
+      }
+    }
+    if ((d.platform === "sm360" || d2cFeesRead) && !failed) {
       const agg = feeRows(d.id, feeStatements, todayEdmonton());
       totals.feeDealersRead++;
       if (agg.length) totals.feeDealersPublished++;

@@ -34,6 +34,7 @@
 import { writeFileSync } from "node:fs";
 import { extractJsonLdVehicles, discoverCategoryPages, extractEdealerVehicles } from "./lib/structured-inventory.mjs";
 import { discoverInventoryPages, discoverFromSitemap, platformHint } from "./lib/inventory-discovery.mjs";
+import { parseD2cListing, d2cPageUrl } from "./lib/d2c-inventory.mjs";
 // ONE definition of what a dealer website reduces to. The scanner keys the
 // catalogue on this and the probe files hosts by it; two copies would drift,
 // and then a host the probe catalogued would be one the scanner cannot find.
@@ -248,6 +249,19 @@ async function tryConvertus(host, trace) {
 // already support, so the common case costs exactly what it did before.
 const EDEALER_PATHS = ["/new/", "/inventory/", "/new-inventory/", "/inventory/new/", "/vehicles/"];
 
+// D2C Media: the used list's first page through the site's own pager address
+// (lib/d2c-inventory.mjs). One request; counts only real vehicle cards.
+async function tryD2c(host, trace) {
+  try {
+    const r = await fetch(d2cPageUrl(host, "used", 0), { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    if (!r.ok) { note(trace, "d2c", `/inventory.html HTTP ${r.status}`); return null; }
+    const rows = parseD2cListing(await r.text(), "used");
+    if (rows.length) return { platform: "d2c", page1: rows.length };
+    note(trace, "d2c", "/inventory.html 200, no D2C vehicle cards");
+  } catch (e) { note(trace, "d2c", `/inventory.html ${e.name || e.message}`); }
+  return null;
+}
+
 async function tryEdealer(host, trace) {
   let sawEdealer = false;
   for (const path of EDEALER_PATHS) {
@@ -326,6 +340,7 @@ function snapshot(results) {
     convertus: results.filter((r) => r.platform === "convertus"),
     jsonld_itemlist: results.filter((r) => r.platform === "jsonld_itemlist"),
     edealer: results.filter((r) => r.platform === "edealer"),
+    d2c: results.filter((r) => r.platform === "d2c"),
     // The misses used to be dropped from the artifact entirely, so a run that
     // was refused by every host and a run that genuinely found nothing wrote
     // an identical file. They are the larger half of the result and now ship
@@ -415,6 +430,8 @@ async function probeOrigin(host, trace) {
   if (jl) return jl;
   const ed = await tryEdealer(host, trace);
   if (ed) return ed;
+  const d2 = await tryD2c(host, trace);
+  if (d2) return d2;
   // EVERY DETECTOR ABOVE GUESSES THE SAME FIVE PATHS. When they all 404 on a
   // site that is plainly working, the conclusion "no feed" is about our URL
   // list, not about the dealer. So: read the dealer's own links, find where
@@ -719,6 +736,9 @@ async function main() {
   for (const r of jsonldList) console.log(`  ${r.host.padEnd(42)} ${r.page1} vehicles on first probed page · ${r.name ?? ""}`);
   console.log(`\n── EDealer (crawlable today): ${edealerList.length} ──`);
   for (const r of edealerList) console.log(`  ${r.host.padEnd(42)} ${r.page1} vehicles on /new/ · ${r.name ?? ""}`);
+  const d2cList = results.filter((r) => r.platform === "d2c");
+  console.log(`\n── D2C Media (crawlable today): ${d2cList.length} ──`);
+  for (const r of d2cList) console.log(`  ${r.host.padEnd(42)} ${r.page1} vehicles on used page 1 · ${r.name ?? ""}`);
   const misses = results.filter((r) => !r.platform);
   console.log(`\n── no feed detected: ${misses.length} ──`);
   // The point of this block: a zero in the lists above is only meaningful next
@@ -781,6 +801,8 @@ async function main() {
       .map((r) => ({ host: r.host, platform: "jsonld_itemlist", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new", "used"], active: true })),
     ...edealerList.filter((r) => r.page1 > 0)
       .map((r) => ({ host: r.host, platform: "edealer", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new", "used"], active: true })),
+    ...results.filter((r) => r.platform === "d2c" && r.page1 > 0)
+      .map((r) => ({ host: r.host, platform: "d2c", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new", "used"], active: true })),
   ];
   if (!seed.length) { console.log("nothing to seed"); return; }
 
