@@ -304,6 +304,8 @@ jobs:
         run: npm run test:wayback
       - name: "Inventory discovery: read the dealer's links, do not guess paths"
         run: npm run test:inventory-discovery
+      - name: "D2C Media inventory: one card, one car; condition from its own address"
+        run: npm run test:d2c-inventory
       - name: "Catalogue status: never greener than the refresh, one list in table, writer and page"
         run: npm run test:catalog-status
       - name: "Used APR: each maker's own certified pre-owned rate, or its own word that there is none"
