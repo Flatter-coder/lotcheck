@@ -82,6 +82,22 @@ check("guard flags the all-Hybrid TX (>=4 trims would fire)", flagAllOnePowertra
   { year: 2026, make: "Lexus", model: "TX", trim: "A", msrp: 1, fuel_type: "Hybrid" }]).length === 1);
 check("guard is quiet after the override (mixed Gas + Hybrid)", flagAllOnePowertrain(tx).length === 0);
 
+// THE SIBLING MUST NAME THE SAME POWERTRAIN (2026-09-25). The 2026 RAV4 is
+// hybrid-only; its only sibling is the plug-in. Refusing it dropped all seven
+// hybrid trims and left the 2026 RAV4 to captured rows no job refreshes.
+{
+  const t = (model, trim, fuel) => ({ make: "Toyota", model, year: 2026, trim, msrp: 40000, fuel_type: fuel });
+  const rav4 = ["LE", "XLE", "XLE Premium", "Woodland", "XSE", "Limited", "XSE Technology Package"].map((x) => t("RAV4", x, "Hybrid"));
+  const phev = ["SE", "XSE", "GR-S", "XSE Technology Package"].map((x) => t("RAV4 Plug-in Hybrid", x, "PHEV"));
+  const f = flagAllOnePowertrain([...rav4, ...phev]);
+  check("a hybrid-only line with only a PLUG-IN sibling is not a proven mis-tag", !f.some((x) => x.key === "Toyota|RAV4|2026" && x.proven));
+  const nx = ["Premium", "Luxury", "F SPORT 2", "Ultra Luxury"].map((x) => ({ make: "Lexus", model: "NX", year: 2026, trim: x, msrp: 50000, fuel_type: "Hybrid" }));
+  const f2 = flagAllOnePowertrain(nx, { knownNameplates: ["Lexus|2026|nx hybrid"] });
+  check("...while an 'NX Hybrid' sibling still proves a bare NX tagged Hybrid is the gas line", f2.some((x) => x.key === "Lexus|NX|2026" && x.proven));
+  const r4 = ["SR5", "TRD Sport", "TRD Off Road Premium", "Limited"].map((x) => t("4Runner", x, "Hybrid"));
+  check("...and a '4Runner Hybrid' sibling still refuses the gas 4Runner tagged Hybrid", flagAllOnePowertrain(r4, { knownNameplates: ["Toyota|2026|4runner hybrid"] }).some((x) => x.proven));
+}
+
 // Every override row is a whole-dollar MSRP with a real fuel — the same bar the
 // scraper's own quality gate applies.
 const allRows = TCI_OVERRIDES.flatMap((o) => o.rows);
