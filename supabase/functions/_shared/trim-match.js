@@ -71,7 +71,9 @@ function normDrive(s) {
   return null;
 }
 
-function fuelKind(s) {
+// Exported so a caller that pre-filters a ladder by powertrain (the city price
+// index) reads a fuel_type exactly the way this matcher does -- one author.
+export function fuelKind(s) {
   const t = String(s == null ? "" : s).toLowerCase();
   if (/phev|plug/.test(t)) return "phev";
   if (/hybrid/.test(t)) return "hybrid";
@@ -396,7 +398,22 @@ export function pickTrimMsrp(rows, sig) {
       sc += wantDrive !== rDrive ? -6 : (rowIdentifiesTheCar(r, s, common, pool) ? 4 : 1);
     }
     // Trim-name token overlap (order-independent, drivetrain words excluded).
-    for (const t of contentTokens(r.trim)) if (wantTokens.has(t)) sc += KEY_TOKENS.has(t) ? 2 : 1;
+    //
+    // A GRADE WORD THE LADDER USES TO TELL ITS ROWS APART IS GRADE EVIDENCE,
+    // whether or not it made KEY_TOKENS. Measured on the live index 2026-09-26:
+    // 1,983 of 5,883 live new cars came back "tie" because their grade --
+    // Comfortline, Trendline, Elevation, Express, Rebel, Avenir -- scored +1,
+    // and a single +1 can never clear the 2-point lead the clear-winner rule
+    // needs, so the RIGHT row lost to "starting_at" every time. KEY_TOKENS is a
+    // vocabulary that will never be complete (the Lexus "Executive" and Honda
+    // "EX-L" entries above were each added after a miss); the ladder itself
+    // says which of its words discriminate. A word on EVERY row (`common`, the
+    // shared model-name noise) still earns only +1, and nothing here can
+    // overrule the configuration, powertrain, ambiguity or sibling checks that
+    // decide the label below.
+    for (const t of contentTokens(r.trim)) {
+      if (wantTokens.has(t)) sc += (KEY_TOKENS.has(t) || (pool.length > 1 && !common.has(t))) ? 2 : 1;
+    }
     // Trim-name CONFLICT — both sides name a grade and they share none of them.
     // Without this, overlap could only ever add, so a row that matched on
     // drivetrain alone (+4) outscored the correctly-named trim (+2): a Premium

@@ -27,7 +27,10 @@
 //   node scripts/build-city-price-index.mjs                # writes; needs SUPABASE_* env
 import { pathToFileURL } from "node:url";
 import { pickTrimMsrp } from "../supabase/functions/_shared/trim-match.js";
-import { buildCatalogIndex, classifyNewCar, tallyNewCars, makerVsDealerStatus, isSourceReason } from "./lib/maker-match.mjs";
+import { buildCatalogIndex, classifyNewCar, tallyNewCars, makerVsDealerStatus, isSourceReason, matchSignals, effectivePrice, makeKey } from "./lib/maker-match.mjs";
+
+// One author for "the price the dealer is asking": scripts/lib/maker-match.mjs.
+export { effectivePrice };
 
 const DRY = process.argv.includes("--dry-run");
 
@@ -94,10 +97,10 @@ export function percentile(sortedNums, p) {
 // year+make+model (candidates), same contract as pickTrimMsrp itself.
 export function matchListingToMsrp(listing, catalogRows) {
   if (!(Number(listing?.list_price) > 0)) return null;
-  const match = pickTrimMsrp(catalogRows || [], {
-    trim: listing.trim,
-    quotedPrice: listing.list_price,
-  });
+  // Same signals the live classifier sends (maker-match.mjs matchSignals):
+  // the cleaned trim, the trim as a drivetrain source, the powertrain the
+  // listing names, the price.
+  const match = pickTrimMsrp(catalogRows || [], matchSignals(listing, listing.list_price));
   // "starting_at" is an honest guess, not a confident trim match -- excluded
   // from the index the same way alberta-scope.md requires for low-confidence
   // rows, kept out rather than quietly averaged in.
@@ -177,16 +180,6 @@ export const FREIGHT_FEES_CEILING = 5500;  // excl_freight or unknown basis
 export const FEES_ONLY_CEILING = 1500;     // incl_freight: freight is in, fees are not
 export const AT_TOLERANCE_PCT = 0.05;      // same rounding shade fn_alberta_msrp_deviation uses
 
-// The price the dealer is actually asking. The crawler writes sale_price as
-// final ?? asking (see crawl-alberta-inventory.mjs), so sale_price is the
-// effective advertised price whenever any price exists — same column
-// fn_alberta_msrp_deviation reads.
-export function effectivePrice(l) {
-  if (Number(l?.sale_price) > 0) return Number(l.sale_price);
-  if (Number(l?.list_price) > 0) return Number(l.list_price);
-  return null;
-}
-
 // The window a catalog row bounds the true ALL-IN sticker into.
 // exact:true means the window is a point — the manufacturer's own figure.
 export function referenceWindow(row) {
@@ -237,7 +230,7 @@ export function stickerInflationFloor(statedMsrp, row) {
 export function pickExactCatalogRow(listing, catalogRows) {
   const price = effectivePrice(listing);
   if (!price) return null;
-  const match = pickTrimMsrp(catalogRows || [], { trim: listing?.trim, quotedPrice: price });
+  const match = pickTrimMsrp(catalogRows || [], matchSignals(listing, price));
   if (!match || match.basis !== "exact" || !(match.msrp > 0)) return null;
   // pickTrimMsrp returns the figure, not the row; recover the row by its
   // (trim, msrp) identity within this model's candidates. Among identical
@@ -338,7 +331,7 @@ function printAccounting(items, tally, catalog, idx) {
     const g = `${l.year} ${l.make} ${l.model}`;
     if (!byReason.has(r.reason)) byReason.set(r.reason, new Map());
     const groups = byReason.get(r.reason);
-    const e = groups.get(g) || { n: 0, trims: new Map(), l, whys: new Set() };
+    const e = groups.get(g) || { n: 0, trims: new Map(), l, whys: new Set(), cm: r.catalogModel || null };
     e.n++; e.trims.set(l.trim || "(none)", (e.trims.get(l.trim || "(none)") || 0) + 1); if (r.why) e.whys.add(r.why);
     groups.set(g, e);
   }
@@ -346,12 +339,13 @@ function printAccounting(items, tally, catalog, idx) {
     console.log(`\n[${reason}] ${tally.reasons[reason]} cars, ${groups.size} model groups`);
     for (const [g, e] of [...groups].sort((a, b) => b[1].n - a[1].n).slice(0, 14)) {
       const trims = [...e.trims].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t, n]) => `"${t}"x${n}`).join(", ");
-      console.log(`  ${String(e.n).padStart(4)}  ${g}  trims: ${trims}${e.whys.size ? `  why: ${[...e.whys].join("/")}` : ""}`);
-      const ymm = idx.byYMM.get(`${e.l.year}|${String(e.l.make || "").toLowerCase()}|${String(e.l.model || "").toLowerCase()}`);
-      if (ymm) {
+      console.log(`  ${String(e.n).padStart(4)}  ${g}${e.cm ? ` -> ${e.cm}` : ""}  trims: ${trims}${e.whys.size ? `  why: ${[...e.whys].join("/")}` : ""}`);
+      const mk = makeKey(e.l.make);
+      const ymm = e.cm ? e.cm.split(" / ").flatMap((m) => idx.byYMM.get(`${e.l.year}|${mk}|${m.toLowerCase()}`) || []) : [];
+      if (ymm.length) {
         console.log(`        catalogue: ${ymm.slice(0, 12).map((c) => `${c.trim || "(no trim)"}${c.drivetrain ? "/" + c.drivetrain : ""}${c.fuel_type ? "/" + c.fuel_type : ""} $${c.msrp}`).join(" | ")}`);
       } else {
-        const mm = idx.models.get(String(e.l.make || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim());
+        const mm = idx.models.get(mk);
         if (mm) console.log(`        catalogue models for the make: ${[...mm.values()].slice(0, 30).map((x) => `${x.name}[${[...x.years].sort().join("/")}]`).join(", ")}`);
       }
     }
@@ -411,45 +405,38 @@ async function main() {
   }
   console.log(`  ${dealers.length} active dealers, ${listings.length} live new cars, ${catalog.length} msrp_catalog rows.`);
 
+  // ONE AUTHOR FOR THE MATCH (scripts/lib/maker-match.mjs classifyNewCar):
+  // the city index, the province read and the daily report's tally all read
+  // the same answer for the same car -- resolved model name, powertrain wall,
+  // cleaned trim and the matcher's own signals. It used to key the catalogue
+  // on the dealer's exact model string, so "Tucson Hybrid", "CR-V Hybrid" and
+  // "Sierra 3500 HD" found no ladder at all (895 cars, 2026-09-26).
   const catalogIdx = buildCatalogIndex(catalog);
-
-  // Group msrp_catalog candidates by year|make|model so each listing's match
-  // only searches its own model's trim ladder.
-  const catalogByYMM = new Map();
-  for (const r of catalog) {
-    const k = `${r.year}|${(r.make || "").toLowerCase()}|${(r.model || "").toLowerCase()}`;
-    if (!catalogByYMM.has(k)) catalogByYMM.set(k, []);
-    catalogByYMM.get(k).push(r);
-  }
+  const accountedFor = listings.map((l) => ({ l, r: classifyNewCar(l, catalogIdx) }));
 
   const byCity = new Map();
   const cityNames = new Map();   // key -> the spellings the roster used for it
   const provRows = [];           // province read — a city is NOT required here
   let matched = 0, unmatched = 0, noCity = 0, twoCities = 0;
   const noCityDealers = new Map();
-  for (const l of listings) {
-    const key = `${l.year}|${(l.make || "").toLowerCase()}|${(l.model || "").toLowerCase()}`;
-
+  for (const { l, r } of accountedFor) {
     // Province-wide read vs the CATALOG sticker. Runs before the city gate on
     // purpose: a dealer with no roster city still sells cars in Alberta, and
     // dropping their inventory here would thin the very read the k-floor
     // protects.
-    if (l.province === "AB") {
-      const picked = pickExactCatalogRow(l, catalogByYMM.get(key));
-      if (picked) {
-        const cls = classifyVsCatalog(picked.price, picked.row);
-        if (cls) {
-          provRows.push({
-            dealer_id: l.dealer_id,
-            dealer_ids: l.dealer_ids,
-            dir: cls.dir,
-            floorPct: cls.floorPct,
-            exact: cls.exact,
-            statedMsrp: Number(l.msrp) > 0 ? Number(l.msrp) : null,
-            inflFloorPct: stickerInflationFloor(l.msrp, picked.row),
-            updated_at: l.updated_at,
-          });
-        }
+    if (l.province === "AB" && r.matched) {
+      const cls = classifyVsCatalog(r.price, r.row);
+      if (cls) {
+        provRows.push({
+          dealer_id: l.dealer_id,
+          dealer_ids: l.dealer_ids,
+          dir: cls.dir,
+          floorPct: cls.floorPct,
+          exact: cls.exact,
+          statedMsrp: Number(l.msrp) > 0 ? Number(l.msrp) : null,
+          inflFloorPct: stickerInflationFloor(l.msrp, r.row),
+          updated_at: l.updated_at,
+        });
       }
     }
 
@@ -468,11 +455,13 @@ async function main() {
     }
     if (!cityNames.has(city)) cityNames.set(city, new Set());
     cityNames.get(city).add(raw);
-    const m = matchListingToMsrp(l, catalogByYMM.get(key));
-    if (!m) { unmatched++; continue; }
+    // The city index has always measured the LIST price (matchListingToMsrp's
+    // contract); a car with no list price stays out of it, as before.
+    if (!r.matched || !(Number(l.list_price) > 0)) { unmatched++; continue; }
     matched++;
+    const deviationDollars = Number(l.list_price) - r.msrp;
     if (!byCity.has(city)) byCity.set(city, []);
-    byCity.get(city).push({ dealer_id: l.dealer_id, dealer_ids: l.dealer_ids, deviationPct: m.deviationPct, deviationDollars: m.deviationDollars, updated_at: l.updated_at });
+    byCity.get(city).push({ dealer_id: l.dealer_id, dealer_ids: l.dealer_ids, deviationPct: (deviationDollars / r.msrp) * 100, deviationDollars, updated_at: l.updated_at });
   }
   console.log(`  matched ${matched} cars to a confident MSRP, ${unmatched} unmatched/low-confidence, ${noCity} with no active dealer city, ${twoCities} listed in two cities (no city index).`);
   // THE DAILY REPORT'S "manufacturer vs Alberta dealer prices" check mark. This
@@ -482,7 +471,6 @@ async function main() {
   // only when every held-back car is the source's; one of ours keeps it amber.
   // Counted over EVERY live new car, not only those with a single city -- the
   // old tally dropped cars listed in two cities from both of its numbers.
-  const accountedFor = listings.map((l) => ({ l, r: classifyNewCar(l, catalogIdx) }));
   const tally = tallyNewCars(accountedFor.map((x) => x.r));
   const status = makerVsDealerStatus(tally);
   printAccounting(accountedFor, tally, catalog, catalogIdx);
