@@ -176,9 +176,15 @@ export function flagAllOnePowertrain(rows, { minTrims = 4, knownNameplates = [],
     ...(rows || []).map((r) => `${r.make}|${r.year}|${String(r.model || "").toLowerCase()}`),
     ...(knownNameplates || []),
   ]);
-  const hasPowertrainSibling = (make, year, model) => {
+  // THE SIBLING MUST NAME THE SAME POWERTRAIN. "NX Hybrid" proves a bare "NX"
+  // tagged Hybrid is the gas line. "RAV4 Plug-in Hybrid" proves nothing about a
+  // "RAV4" tagged Hybrid: 2026-09-25 the 2026 RAV4 is hybrid-only, the only
+  // sibling was the plug-in, and all seven hybrid trims were dropped -- leaving
+  // the whole 2026 RAV4 catalogue to one-off captured rows no job refreshes.
+  const MARKERS = { Hybrid: ["hybrid"], PHEV: ["plug-in hybrid", "plug in hybrid", "phev", "prime"], BEV: ["ev", "electric", "recharge"] };
+  const hasPowertrainSibling = (make, year, model, fuel) => {
     const base = String(model || "").toLowerCase();
-    return ["hybrid", "plug-in hybrid", "plug in hybrid", "phev", "ev", "prime", "recharge"]
+    return (MARKERS[fuel] || ["hybrid", "plug-in hybrid", "plug in hybrid", "phev", "ev", "prime", "recharge"])
       .some((sfx) => nameplates.has(`${make}|${year}|${base} ${sfx}`));
   };
   const flagged = [];
@@ -187,7 +193,7 @@ export function flagAllOnePowertrain(rows, { minTrims = 4, knownNameplates = [],
     const fuels = new Set(rs.map((r) => r.fuel_type));
     if (fuels.size === 1 && !fuels.has("Gas") && !fuels.has(null)) {
       const r0 = rs[0];
-      const sibling = hasPowertrainSibling(r0.make, r0.year, r0.model);
+      const sibling = hasPowertrainSibling(r0.make, r0.year, r0.model, [...fuels][0]);
       // A SECOND, INDEPENDENT PROOF: a nameplate does not change powertrain.
       //
       // If the catalogue already holds Gas rows for this exact nameplate and

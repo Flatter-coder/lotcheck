@@ -515,7 +515,9 @@ export async function readPowertrainHistory(make) {
   if (!ok) return empty;
   const nameplates = new Set(), fuels = new Map();
   for (const r of rows) {
-    nameplates.add(`${r.make}|${r.year}|${String(r.model || "").toLowerCase()}`);
+    // An alias row ("RAV4 Hybrid", alias_of "RAV4") is our own second name for
+    // the same line, not a separate maker nameplate, so it proves no sibling.
+    if (!r.attrs?.alias_of) nameplates.add(`${r.make}|${r.year}|${String(r.model || "").toLowerCase()}`);
     const k = `${r.make}|${r.model}|${r.year}`;
     if (!fuels.has(k)) fuels.set(k, new Set());
     if (r.fuel_type) fuels.get(k).add(r.fuel_type);
