@@ -412,6 +412,19 @@ async function main() {
     byCity.get(city).push({ dealer_id: l.dealer_id, dealer_ids: l.dealer_ids, deviationPct: m.deviationPct, deviationDollars: m.deviationDollars, updated_at: l.updated_at });
   }
   console.log(`  matched ${matched} cars to a confident MSRP, ${unmatched} unmatched/low-confidence, ${noCity} with no active dealer city, ${twoCities} listed in two cities (no city index).`);
+  // THE DAILY REPORT'S "manufacturer vs Alberta dealer prices" check mark. This
+  // index IS that comparison -- every live new car measured against its maker's
+  // own figure -- so its coverage is how many live new cars could be measured.
+  // Green only when every one of them was; unmatched cars are our gap.
+  if (process.env.CATALOG_STATUS_OUT) {
+    const { writeFileSync } = await import("node:fs");
+    const n = listings.length;
+    writeFileSync(process.env.CATALOG_STATUS_OUT, JSON.stringify({
+      state: matched === 0 ? "red" : matched >= n ? "green" : "amber",
+      covered: matched, of_total: n, unit: "new cars measured against the maker's MSRP",
+      note: `${matched.toLocaleString("en-CA")} of ${n.toLocaleString("en-CA")} live new cars at Alberta dealers matched to a confident manufacturer MSRP; ${unmatched.toLocaleString("en-CA")} could not be matched to an exact trim yet.`,
+    }));
+  }
   if (noCityDealers.size) {
     console.warn(`  ${noCityDealers.size} active dealer(s) have NO city and their listings are excluded entirely:`);
     for (const [id, n] of [...noCityDealers].sort((a, b) => b[1] - a[1]).slice(0, 20)) {
