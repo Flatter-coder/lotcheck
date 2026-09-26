@@ -385,8 +385,12 @@ async function fetchPage(host, section, page) {
 export function feeRows(dealerId, statements, day) {
   const by = new Map();
   for (const st of statements || []) for (const f of st.fees || []) {
-    const k = `${st.basis}|${f.name}|${f.amount}`;
-    const cur = by.get(k) || { dealer_id: dealerId, observed_on: day, basis: st.basis, fee_name: f.name, fee_label: f.feeLabel, amount: f.amount, vehicles: 0, source: "sm360_feed" };
+    // A dealer's new-car and used-car fees differ (Taza Park VW 2026-09-25:
+    // Admin Fee $500 on new, Doc Fee $899 on used), so condition is part of
+    // the fact, never averaged across.
+    const condition = st.condition === "new" || st.condition === "used" ? st.condition : "unknown";
+    const k = `${condition}|${st.basis}|${f.name}|${f.amount}`;
+    const cur = by.get(k) || { dealer_id: dealerId, observed_on: day, condition, basis: st.basis, fee_name: f.name, fee_label: f.feeLabel, amount: f.amount, vehicles: 0, source: "sm360_feed" };
     cur.vehicles++;
     by.set(k, cur);
   }
@@ -670,7 +674,7 @@ async function main() {
       result.rows = gate.rows;
       if (result.fees) {
         const kept = new Set(result.rows.map((r) => r.vin));
-        for (const f of result.fees) if (kept.has(f.vin)) feeStatements.push(...f.statements);
+        for (const f of result.fees) if (kept.has(f.vin)) feeStatements.push(...f.statements.map((st) => ({ ...st, condition: cond })));
       }
       partial = partial || result.partial;
       if (result.partial) condState[cond].ok = false;
@@ -731,7 +735,7 @@ async function main() {
       if (agg.length) totals.feeDealersPublished++;
       if (DRY) { for (const r of agg.slice(0, 4)) console.log(`      fee: ${r.basis} ${r.fee_name} $${r.amount} on ${r.vehicles} car(s)`); }
       else if (agg.length) {
-        const { error } = await supabase.from("dealer_fee_observation").upsert(agg, { onConflict: "dealer_id,observed_on,basis,fee_name,amount" });
+        const { error } = await supabase.from("dealer_fee_observation").upsert(agg, { onConflict: "dealer_id,observed_on,condition,basis,fee_name,amount" });
         if (error) console.warn(`    dealer fees not written: ${error.message}`);
         else console.log(`    dealer fees: ${agg.length} published fee line(s) recorded`);
       }
@@ -805,6 +809,17 @@ upserted=${totals.upserted}
       : `${ok} dealer${ok === 1 ? "" : "s"} read (${totals.rows.toLocaleString("en-CA")} cars on sale refreshed) · ${refused} refuse our crawler` +
         (ofTotal ? ` · ${Math.max(0, ofTotal - accounted).toLocaleString("en-CA")} not yet accounted for (platforms we cannot read yet, or no answer), of ${ofTotal.toLocaleString("en-CA")} Alberta dealer sites.` : ".");
     writeFileSync(process.env.CATALOG_STATUS_OUT, JSON.stringify({ state, rows_total: totals.rows, covered: accounted, of_total: ofTotal, unit: "dealer sites accounted for", note }));
+    if (process.env.CATALOG_STATUS_COMPARE_OUT) {
+      // The per-dealer comparison (fn_dealer_price_compare) is complete for a
+      // dealer once both its prices and its own fee statement were read today.
+      const both = totals.feeDealersRead;
+      writeFileSync(process.env.CATALOG_STATUS_COMPARE_OUT, JSON.stringify({
+        state: both === 0 ? "red" : ofTotal && both >= ofTotal ? "green" : "amber",
+        covered: both, of_total: ofTotal, unit: "dealer sites with prices and fees",
+        note: both === 0 ? "No dealer had both its prices and its fee statement read this run."
+          : `${both} dealer${both === 1 ? "" : "s"} compared on price and their own published fees (new and used apart); the other ${ok - both} read today publish no fee statement we can read yet.`,
+      }));
+    }
     if (process.env.CATALOG_STATUS_FEES_OUT) {
       // Dealer fees: a dealer counts once its fee statement was READ -- whether
       // it publishes fees or states none. A dealer on a platform whose data

@@ -28,5 +28,13 @@ const doc499 = rows.find((r) => r.basis === "cash" && r.fee_name === "Doc Fee" &
 check("rows count cars per amount, so $899 on 2 and $499 on 1 stay different facts", doc899?.vehicles === 2 && doc499?.vehicles === 1, JSON.stringify(rows));
 check("every row names its dealer, day and source", rows.every((r) => r.dealer_id === 7 && r.observed_on === "2026-09-25" && r.source === "sm360_feed"));
 
+// New and used apart: Taza Park VW charges Admin $500 on new, Doc $899 on used.
+{
+  const neu = { ...c, condition: "new" }, used = { ...c, condition: "used" };
+  const doc = feeRows(7, [neu, used, c], "2026-09-26").filter((r) => r.fee_name === "Doc Fee");
+  check("the same fee on new and used cars stays two facts, and an untagged one is 'unknown'",
+    doc.length === 3 && doc.every((r) => r.vehicles === 1) && ["new", "used", "unknown"].every((x) => doc.some((r) => r.condition === x)), JSON.stringify(doc));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -108,6 +108,7 @@ jobs:
           HOST_INPUT: ${{ inputs.host }}
           CATALOG_STATUS_OUT: ${{ runner.temp }}/inventory-status.json
           CATALOG_STATUS_FEES_OUT: ${{ runner.temp }}/fees-status.json
+          CATALOG_STATUS_COMPARE_OUT: ${{ runner.temp }}/compare-status.json
           REBUILD_INPUT: ${{ inputs.rebuild_only }}
         run: |
           # Rebuild-only (2026-09-25): the 09-25 crawl wrote 17,554 observations
@@ -145,6 +146,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CATALOG_STATUS_OUT: ${{ runner.temp }}/maker-vs-dealer.json
         run: node scripts/build-city-price-index.mjs
       # The public daily new/used count (/inventory-daily). Reads today's
       # listing_observation rows this crawl just wrote -- a database fact, not
@@ -179,13 +181,13 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/record-catalog-status.mjs --catalog inventory --outcome ${{ steps.crawl.outcome }} --summary "${{ runner.temp }}/inventory-status.json" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      # The per-dealer price comparison is rebuilt only after a crawl wrote.
-      - name: Record catalogue status (price comparison)
+      # The city price index IS the manufacturer-vs-dealer comparison (live new cars vs MSRP).
+      - name: Record catalogue status (manufacturer vs dealer prices)
         if: ${{ always() && steps.crawl.outputs.dry == 'false' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/record-catalog-status.mjs --catalog price_compare --outcome ${{ steps.index.outcome }} --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: node scripts/record-catalog-status.mjs --catalog maker_vs_dealer --outcome ${{ steps.index.outcome }} --summary "${{ runner.temp }}/maker-vs-dealer.json" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       # Dealer fees are read by the same crawl (SM360 dealers state them per car).
       - name: Record catalogue status (dealer fees)
         if: ${{ always() && steps.crawl.outputs.dry == 'false' }}
@@ -193,3 +195,10 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/record-catalog-status.mjs --catalog dealer_fees --outcome ${{ steps.crawl.outcome }} --summary "${{ runner.temp }}/fees-status.json" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      # The per-dealer comparison: price beside that dealer's own published fees.
+      - name: Record catalogue status (per-dealer comparison)
+        if: ${{ always() && steps.crawl.outputs.dry == 'false' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/record-catalog-status.mjs --catalog price_compare --outcome ${{ steps.crawl.outcome }} --summary "${{ runner.temp }}/compare-status.json" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
