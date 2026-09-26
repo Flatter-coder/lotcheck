@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { dedupeBy, writeCatalogs, readPowertrainHistory } from "./catalog-io.mjs";
 import { CROSS_CHECK_PROVINCES, deriveSeriesMsrp, baseModelCode } from "./tci-msrp.mjs";
 import { parseFeeStack, feeStackTotal, allInBreakdown } from "./tci-fees.mjs";
-import { applyTciOverrides, flagAllOnePowertrain } from "./tci-overrides.mjs";
+import { addTciAliases, applyTciOverrides, flagAllOnePowertrain } from "./tci-overrides.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
@@ -50,6 +50,37 @@ function inferFuel(name, tag) {
   if (/all-electric|battery electric|\bev\b/.test(n)) return "BEV";
   if (/fuel cell/.test(n)) return "FCEV";
   return FUEL_MAP[tag] || null;
+}
+
+// THE MODEL SAYS WHAT DRIVES IT; THE SERIES TAG DOES NOT.
+//
+// The series tag is set per LINE ("Hybrid Available"), so every gas trim of a
+// line that also sells a hybrid came back "Hybrid". Measured 2026-09-26: all 10
+// 2026 Tacoma trims in Alberta hang off two SR5 models whose own record says
+// "2.4L 4-Cylinder Turbo engine" (engine T24A-FTS), the 4Runner SR5 says "2.4L
+// Turbo iForce Engine", the Corolla Cross models carry M20A-FKS -- all gas, all
+// stored "Hybrid", so a gas listing was measured against hybrid rows or matched
+// nothing. [[powertrain-identity-rule]]
+//
+// Each model's own record names its engine (Toyota's engine code) and
+// describes it. The description decides first: "hybrid" / "i-FORCE MAX" / "THS"
+// is a hybrid, because i-FORCE MAX reuses the gas engine's code (T24A-FTS,
+// V35A-FTS). Then the code: Toyota's -FX suffix is its hybrid (Atkinson)
+// family (A25A-FXS, M20A-FXS, 2ZR-FXE); -FKS / -FTS / -GKS / -FE are gas.
+// Some records give a bare block ("V35A", Tundra) that both powertrains share;
+// there Toyota's own naming decides -- "i-FORCE" without "MAX" is the gas
+// engine ("3.4L Twin Turbo i-FORCE V6").
+// A plug-in, electric or fuel-cell series keeps its own tag. Unknown -> null,
+// and the series tag stands (the powertrain guard still watches it).
+export function modelPowertrain(model, seriesFuel) {
+  if (["PHEV", "BEV", "FCEV"].includes(seriesFuel)) return seriesFuel;
+  const text = String(model?.powertrainText || "");
+  if (/i-?force\s*max|hybrid|\bTHS\b/i.test(text)) return "Hybrid";
+  const e = String(model?.engine || "").toUpperCase();
+  if (/-FX[SE]\b/.test(e)) return "Hybrid";
+  if (/-(F[KT]S|GKS|FE)\b/.test(e)) return "Gas";
+  if (/\bi-?force\b(?!\s*max)/i.test(text)) return "Gas";
+  return null;
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -139,10 +170,14 @@ async function fetchModel(host, brandFolder, seriesCode, year, modelCode) {
   if (modelCache.has(key)) return modelCache.get(key);
   const modelPath = `/content/dam/tcidigital/vehicle-fragments/${brandFolder}/${seriesCode}/${year}-${modelCode.toLowerCase()}-models`;
   const url = `${host}/graphql/execute.json/tcidigital/BnP-get-models%3BmodelPath%3D${encodeURIComponent(modelPath)}%3b.json`;
-  const out = { grade: null, packages: new Map() };
+  const out = { grade: null, packages: new Map(), engine: null, powertrainText: "" };
   try {
     const item = (await getJson(url))?.data?.modelV2ByPath?.item;
     out.grade = item?.grade || null;
+    out.engine = item?.engine || null;
+    const desc = (x) => (typeof x === "string" ? x : x?.plaintext || x?.html || "");
+    out.powertrainText = [desc(item?.tciModelDescriptionEn), desc(item?.modelDescriptionEn), item?.keyFeaturesFragmentPath?.keyFeatureEn?.html]
+      .map((t) => String(t || "").replace(/<[^>]+>/g, " ")).join(" ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").slice(0, 600);
     for (const p of item?.packagesFragmentPath || []) {
       if (p?.packageSuffixCode) {
         out.packages.set(p.packageSuffixCode, { name: p?.packageSuffixDescriptionEn?.plaintext || null, isBase: !!p.isBasePackage });
@@ -518,7 +553,7 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
           const feeTotal = stackIsForThisConfig ? feeStackTotal(feeStack) : null;
           const breakdown = stackIsForThisConfig ? allInBreakdown(feeStack) : null;
           msrpRows.push({
-            year, make: makeName, model: s.name, trim, msrp, fuel_type: fuel,
+            year, make: makeName, model: s.name, trim, msrp, fuel_type: modelPowertrain(model, fuel) || fuel,
             // A drivetrain the manufacturer stated in the grade ("XLE FWD"), not
             // one inferred from a name. Left null when the grade did not say, so
             // carry-forward can still supply the hand-verified value.
@@ -616,8 +651,12 @@ export async function run(config) {
   // so replaceRows() can't wipe it. See tci-overrides.mjs (proper inferFuel fix
   // is tracked separately). The guard warns if any OTHER multi-powertrain line
   // comes back all one non-gas fuel, so the next mis-tag is loud, not silent.
-  const { rows: msrpRows, replaced } = applyTciOverrides(rawMsrp, config.makeName);
-  for (const r of replaced) console.log(`  override: ${r.key} — dropped ${r.dropped} scraped row(s), inserted ${r.inserted} verified`);
+  const { rows: overridden, replaced } = applyTciOverrides(rawMsrp, config.makeName);
+  const msrpRows = addTciAliases(overridden);
+  for (const r of replaced) {
+    console.log(`  override: ${r.key} — dropped ${r.dropped} scraped row(s); ${r.confirmed} of ${r.inserted} confirmed by today's feed, ${r.inserted - r.confirmed} hand-verified row(s) kept`);
+    for (const d of r.disagree || []) console.warn(`    DISAGREE ${r.key} ${d} — verified figure kept; re-read the maker's page.`);
+  }
   // A PROVEN MIS-TAG IS NOW REFUSED, NOT JUST LOGGED. This was a console.warn,
   // so a whole gasoline line tagged "Hybrid" shipped to msrp_catalog anyway --
   // and every downstream consumer then offered a hybrid buyer the GAS ladder

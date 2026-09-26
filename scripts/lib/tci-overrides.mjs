@@ -75,6 +75,29 @@ export const TCI_OVERRIDES = [
 
 const key = (make, model, year) => `${String(make).toLowerCase()}|${String(model).toLowerCase()}|${year}`;
 
+// SECOND NAMES FOR ONE LINE, written from the live rows on every run.
+// Dealers list the hybrid-only 2026 RAV4 as "RAV4", "RAV4 Hybrid" and "RAV4
+// HEV"; the catalogue answered all three only because a 2026-08-15 migration
+// copied the RAV4 rows under "RAV4 Hybrid" -- once. Those copies never
+// refreshed, so they froze at their capture while the RAV4 rows moved (the
+// refresh guard failed on them every run). Now each alias row is the live row
+// under its second name, re-derived from this morning's figures.
+export const TCI_ALIASES = [
+  { make: "Toyota", model: "RAV4", year: 2026, alias: "RAV4 Hybrid",
+    reason: "2026 RAV4 is hybrid-only; Toyota and its dealers use both names" },
+];
+export function addTciAliases(rows, aliases = TCI_ALIASES) {
+  const today = new Date().toISOString().slice(0, 10);
+  const out = [...(rows || [])];
+  for (const a of aliases) {
+    for (const r of rows || []) {
+      if (r.make !== a.make || r.model !== a.model || r.year !== a.year) continue;
+      out.push({ ...r, model: a.alias, attrs: { ...(r.attrs || {}), alias_of: a.model, alias_reason: a.reason, alias_resynced_at: today } });
+    }
+  }
+  return out;
+}
+
 /** Replace scraped rows for any overridden (make, model, year) with the
  *  hand-maintained set. Rows for models with no override pass through untouched.
  *  Pure; returns { rows, replaced: [{key, dropped, inserted}] }. */
@@ -88,10 +111,14 @@ export function applyTciOverrides(scrapedRows, makeName, overrides = TCI_OVERRID
 
   const replaced = [];
   const dropped = new Map();
+  const scraped = new Map(); // override key -> Map(lowercased trim -> scraped row)
   const kept = (scrapedRows || []).filter((r) => {
     const k = key(r.make, r.model, r.year);
-    if (byKey.has(k)) { dropped.set(k, (dropped.get(k) || 0) + 1); return false; }
-    return true;
+    if (!byKey.has(k)) return true;
+    dropped.set(k, (dropped.get(k) || 0) + 1);
+    if (!scraped.has(k)) scraped.set(k, new Map());
+    scraped.get(k).set(String(r.trim ?? "").toLowerCase().trim(), r);
+    return false;
   });
 
   const injected = [];
@@ -107,8 +134,27 @@ export function applyTciOverrides(scrapedRows, makeName, overrides = TCI_OVERRID
   // the manufacturer's page — and fetched_at alone cannot tell them apart. So
   // the rows now carry their own provenance.
   const VERIFIED_ON = "2026-08-26T00:00:00.000Z";
+  //
+  // AN OVERRIDE RETIRES ITSELF, ROW BY ROW, WHEN THE FEED AGREES (2026-09-26).
+  // Once the scraper read powertrain per model, the feed's own RX 350 and TX 350
+  // rows matched these figures to the dollar -- yet the frozen copies kept
+  // failing the freshness guard every morning. Where this run's scrape carries
+  // the same trim at the same price and powertrain, the scraped row IS a fresh
+  // re-verification, so it is written instead. Where the feed lacks the trim
+  // (the TX 500h hybrids) or disagrees, the hand-verified row stands and the
+  // disagreement is reported, never silently resolved either way.
   for (const [k, o] of byKey) {
+    const feed = scraped.get(k) || new Map();
+    let confirmed = 0;
+    const disagree = [];
     for (const row of o.rows) {
+      const s = feed.get(row.trim.toLowerCase().trim());
+      if (s && Number(s.msrp) === row.msrp && s.fuel_type === row.fuel_type) {
+        injected.push({ ...s, trim: row.trim, attrs: { ...(s.attrs || {}), override_confirmed: true } });
+        confirmed++;
+        continue;
+      }
+      if (s) disagree.push(`${row.trim}: feed ${s.msrp} ${s.fuel_type} vs verified ${row.msrp} ${row.fuel_type}`);
       injected.push({
         year: o.year, make: o.make, model: o.model, trim: row.trim, msrp: row.msrp,
         fuel_type: row.fuel_type, fetched_at: VERIFIED_ON,
@@ -121,7 +167,7 @@ export function applyTciOverrides(scrapedRows, makeName, overrides = TCI_OVERRID
         },
       });
     }
-    replaced.push({ key: k, dropped: dropped.get(k) || 0, inserted: o.rows.length });
+    replaced.push({ key: k, dropped: dropped.get(k) || 0, inserted: o.rows.length, confirmed, disagree });
   }
   return { rows: [...kept, ...injected], replaced };
 }
@@ -144,6 +190,7 @@ export function applyTciOverrides(scrapedRows, makeName, overrides = TCI_OVERRID
 export function flagAllOnePowertrain(rows, { minTrims = 4, knownNameplates = [], priorFuels = new Map() } = {}) {
   const groups = new Map();
   for (const r of rows || []) {
+    if (r.attrs?.alias_of) continue; // a second name inherits its line's verdict
     const k = `${r.make}|${r.model}|${r.year}`;
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(r);
@@ -173,7 +220,8 @@ export function flagAllOnePowertrain(rows, { minTrims = 4, knownNameplates = [],
   // A nameplate that had a powertrain-marked sibling yesterday still proves the
   // mis-tag today, so the catalogue's nameplates count too.
   const nameplates = new Set([
-    ...(rows || []).map((r) => `${r.make}|${r.year}|${String(r.model || "").toLowerCase()}`),
+    // An alias row is our second name for the same line, not a maker sibling.
+    ...(rows || []).filter((r) => !r.attrs?.alias_of).map((r) => `${r.make}|${r.year}|${String(r.model || "").toLowerCase()}`),
     ...(knownNameplates || []),
   ]);
   // THE SIBLING MUST NAME THE SAME POWERTRAIN. "NX Hybrid" proves a bare "NX"

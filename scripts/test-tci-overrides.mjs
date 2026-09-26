@@ -7,7 +7,9 @@
 // every refresh; if one drifts, this fails before it reaches the catalog.
 
 import { readFileSync } from "node:fs";
-import { TCI_OVERRIDES, applyTciOverrides, flagAllOnePowertrain } from "./lib/tci-overrides.mjs";
+import { TCI_OVERRIDES, addTciAliases, applyTciOverrides, flagAllOnePowertrain } from "./lib/tci-overrides.mjs";
+import { modelPowertrain } from "./lib/tci-stack.mjs";
+import { catKey } from "./lib/catalog-io.mjs";
 
 let pass = 0, fail = 0;
 const check = (label, cond) => { console.log(`${cond ? "PASS" : "FAIL"}  ${label}`); cond ? pass++ : fail++; };
@@ -244,6 +246,99 @@ const RUNNER_2026_09_22 = [
 
   check("the verification date agrees with fetched_at",
     rows.every((r) => String(r.fetched_at).slice(0, 10) === r.attrs.verified_on));
+}
+
+// ---------------------------------------------------------------------------
+// POWERTRAIN IS READ PER MODEL, NOT PER SERIES (2026-09-26).
+// Toyota publishes one "4Runner" series and one "Corolla Cross" series that
+// carry both gas and hybrid models. The series-level tag called every model
+// Hybrid, so the gas trims were either refused (and went stale) or -- on lines
+// with no marked sibling (Tacoma, Tundra, Highlander) -- stored as Hybrid.
+{
+  check("a hybrid engine code (-FXS) reads Hybrid",
+    modelPowertrain({ engine: "A25A-FXS" }, "Hybrid") === "Hybrid");
+  check("a gas engine code (-FKS / -FTS) reads Gas under a Hybrid-tagged series",
+    modelPowertrain({ engine: "M20A-FKS" }, "Hybrid") === "Gas" && modelPowertrain({ engine: "T24A-FTS" }, "Hybrid") === "Gas");
+  check("i-FORCE MAX reuses the gas turbo code, so the model's own text wins",
+    modelPowertrain({ engine: "T24A-FTS", powertrainText: "2.4L i-FORCE MAX turbocharged hybrid" }, "Gas") === "Hybrid");
+  check("a bare shared block (V35A) decides by name: 'i-FORCE V6' is gas, 'i-FORCE MAX' is hybrid",
+    modelPowertrain({ engine: "V35A", powertrainText: "3.4L Twin Turbo i-FORCE V6 with 10-Speed" }, "Hybrid") === "Gas" &&
+    modelPowertrain({ engine: "V35A", powertrainText: "3.4L i-FORCE MAX" }, "Hybrid") === "Hybrid");
+  check("a plug-in or electric series keeps its tag (the engine code can't tell PHEV from HEV)",
+    modelPowertrain({ engine: "A25A-FXS" }, "PHEV") === "PHEV" && modelPowertrain({ engine: "" }, "BEV") === "BEV");
+  check("no evidence returns null, so the series tag stands (missing beats a guess)",
+    modelPowertrain({ engine: "" }, "Hybrid") === null && modelPowertrain(null, "Gas") === null);
+}
+
+// ---------------------------------------------------------------------------
+// A SECOND NAME IS WRITTEN FROM THE LIVE ROWS, EVERY RUN.
+// "RAV4 Hybrid" 2026 was a one-time migration copy of the RAV4 rows; it froze
+// at its capture and failed the freshness guard on every refresh.
+{
+  const live = [
+    { make: "Toyota", year: 2026, model: "RAV4", trim: "LE", msrp: 40000, fuel_type: "Hybrid" },
+    { make: "Toyota", year: 2026, model: "RAV4", trim: "XLE", msrp: 41300, fuel_type: "Hybrid" },
+    { make: "Toyota", year: 2026, model: "RAV4", trim: "XSE", msrp: 50900, fuel_type: "Hybrid" },
+    { make: "Toyota", year: 2026, model: "RAV4", trim: "LIMITED", msrp: 52000, fuel_type: "Hybrid" },
+    { make: "Toyota", year: 2026, model: "Camry", trim: "SE", msrp: 36000, fuel_type: "Hybrid" },
+  ];
+  const out = addTciAliases(live);
+  const alias = out.filter((r) => r.model === "RAV4 Hybrid");
+  check("each live RAV4 row gets its 'RAV4 Hybrid' twin", alias.length === 4);
+  check("...at today's figure, not a frozen copy",
+    alias.find((r) => r.trim === "LIMITED")?.msrp === 52000);
+  check("...marked alias_of with a reason and today's date",
+    alias.every((r) => r.attrs?.alias_of === "RAV4" && r.attrs?.alias_reason &&
+      r.attrs?.alias_resynced_at === new Date().toISOString().slice(0, 10)));
+  check("the live rows are untouched", out.filter((r) => r.model === "RAV4").every((r) => !r.attrs?.alias_of));
+  check("other lines get no alias", out.filter((r) => r.model.startsWith("Camry")).length === 1);
+
+  // The alias is OUR second name for the same line -- it must never serve as
+  // the "marked sibling" that proves the bare RAV4 a gas line, nor be judged itself.
+  const flags = flagAllOnePowertrain(out);
+  check("an alias row never proves its own line a mis-tag",
+    !flags.some((f) => f.proven && f.key.includes("|RAV4|")));
+  check("an alias row is not judged on its own", !flags.some((f) => f.key.includes("RAV4 Hybrid")));
+}
+
+// ---------------------------------------------------------------------------
+// AN OVERRIDE RETIRES ITSELF WHERE THE FEED AGREES (2026-09-26).
+// With powertrain read per model, the feed's RX 350 rows match the verified
+// figures to the dollar; the frozen copies were failing the freshness guard.
+{
+  const now = "2026-09-26T08:00:00.000Z";
+  const feedRx = [
+    { year: 2026, make: "Lexus", model: "RX", trim: "Premium", msrp: 60885, fuel_type: "Gas", fetched_at: now },
+    { year: 2026, make: "Lexus", model: "RX", trim: "LUXURY",  msrp: 68299, fuel_type: "Gas", fetched_at: now },
+    { year: 2026, make: "Lexus", model: "RX", trim: "F SPORT 2", msrp: 70999, fuel_type: "Gas", fetched_at: now }, // moved
+  ];
+  const { rows: r3, replaced: rep3 } = applyTciOverrides(feedRx, "Lexus");
+  const rx = r3.filter((r) => r.model === "RX");
+  const prem = rx.find((r) => r.trim === "Premium");
+  const lux = rx.find((r) => r.trim === "Luxury");
+  const fs2 = rx.find((r) => r.trim === "F SPORT 2");
+  check("an agreeing feed row is written fresh, not frozen", prem?.fetched_at === now && prem?.attrs?.override_confirmed === true);
+  check("...under the verified trim spelling (case differs in the feed)", !!lux && lux.fetched_at === now);
+  check("a disagreeing feed row never wins: the verified figure stands", fs2?.msrp === 70799 && fs2?.attrs?.seeded === "tci-override");
+  const rxRep = rep3.find((r) => r.key === "lexus|rx|2026");
+  check("...and the disagreement is reported", rxRep?.confirmed === 2 && rxRep?.disagree.length === 1 && /F SPORT 2/.test(rxRep.disagree[0]));
+  check("a trim the feed lacks keeps its verified row", rx.some((r) => r.trim === "F SPORT Black Line" && r.attrs?.seeded === "tci-override"));
+  check("still exactly one row per verified trim", rx.length === 7 && new Set(rx.map((r) => r.trim)).size === 7);
+}
+
+// ---------------------------------------------------------------------------
+// CASE IS NOT IDENTITY. The captured "Limited" ($52,350, which carried $350 of
+// paint) and the feed's "LIMITED" ($52,000) were two keys, so the live figure
+// never superseded the stale one.
+{
+  check("trim case and spacing do not split a key",
+    catKey({ year: 2026, model: "RAV4", trim: "Limited" }) === catKey({ year: 2026, model: "RAV4", trim: "LIMITED " }));
+  check("model case does not split a key",
+    catKey({ year: 2026, model: "RAV4 Hybrid", trim: "XLE" }) === catKey({ year: 2026, model: "Rav4  hybrid", trim: "XLE" }));
+  check("different trims still differ",
+    catKey({ year: 2026, model: "RAV4", trim: "XLE" }) !== catKey({ year: 2026, model: "RAV4", trim: "XSE" }));
+  check("a missing trim is its own key, not 'null'",
+    catKey({ year: 2026, model: "RAV4", trim: null }) === "2026|rav4|");
 }
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
