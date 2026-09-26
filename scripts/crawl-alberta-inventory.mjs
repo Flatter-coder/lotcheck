@@ -42,6 +42,8 @@ import { politeFetch, requestLedger } from "./lib/polite-fetch.mjs";
 import { extractConvertusVmsRoot } from "../supabase/functions/_shared/convertus-vms.js";
 import { sm360VehicleFees } from "../supabase/functions/_shared/sm360-fees.js";
 import { parseD2cListing, d2cPageUrl } from "./lib/d2c-inventory.mjs";
+import { extractD2cVdpVehicle } from "../supabase/functions/_shared/d2c-vdp.js";
+import { normalizeFeeLabel } from "../supabase/functions/_shared/fee-vocab.ts";
 import { pathToFileURL } from "node:url";
 import { appendFileSync, writeFileSync } from "node:fs";
 
@@ -393,7 +395,7 @@ export function feeRows(dealerId, statements, day) {
     // the fact, never averaged across.
     const condition = st.condition === "new" || st.condition === "used" ? st.condition : "unknown";
     const k = `${condition}|${st.basis}|${f.name}|${f.amount}`;
-    const cur = by.get(k) || { dealer_id: dealerId, observed_on: day, condition, basis: st.basis, fee_name: f.name, fee_label: f.feeLabel, amount: f.amount, vehicles: 0, source: "sm360_feed" };
+    const cur = by.get(k) || { dealer_id: dealerId, observed_on: day, condition, basis: st.basis, fee_name: f.name, fee_label: f.feeLabel, amount: f.amount, vehicles: 0, source: st.source || "sm360_feed" };
     cur.vehicles++;
     by.set(k, cur);
   }
@@ -650,6 +652,7 @@ async function main() {
     const condState = { new: { crawled: false, ok: true }, used: { crawled: false, ok: true } };
     let failed = false, partial = false, refusedWhy = null;
     const feeStatements = [];
+    const d2cFeeSamples = [];
 
     // Each platform names its sections differently: SM360 uses the URL segment
     // (new-inventory), everything else uses the plain new/used it links to.
@@ -705,6 +708,7 @@ async function main() {
         continue;
       }
       result.rows = gate.rows;
+      if (isD2c) { const u = result.rows.find((r) => r.vdp_url)?.vdp_url; if (u) d2cFeeSamples.push({ cond, url: u }); }
       if (result.fees) {
         const kept = new Set(result.rows.map((r) => r.vin));
         for (const f of result.fees) if (kept.has(f.vin)) feeStatements.push(...f.statements.map((st) => ({ ...st, condition: cond })));
@@ -762,7 +766,25 @@ async function main() {
     // dealer states it charges, in its own words, and on how many of today's
     // cars. Only a platform whose data carries the dealer's fee statement is
     // counted as read for fees; the rest are our gap, not "no fees".
-    if (d.platform === "sm360" && !failed) {
+    // D2C lists no fees on its listing page; its vehicle pages itemise them
+    // (_shared/d2c-vdp.js, customFeesList). A dealer's fee ladder is set per
+    // condition, so ONE vehicle page per condition is read -- two requests, not
+    // hundreds -- and each fee counts one car. A page that itemises none is a
+    // fee statement read ("none itemised"), not our gap.
+    let d2cFeesRead = false;
+    if (isD2c && !failed && !DRY) {
+      for (const { cond, url } of d2cFeeSamples) {
+        await sleep(effectiveDelayMs);
+        try {
+          const v = extractD2cVdpVehicle(await fetchHtml(url));
+          if (!v) continue;
+          d2cFeesRead = true;
+          feeStatements.push({ basis: "cash", condition: cond, source: "d2c_vdp",
+            fees: (v.dealerFees || []).map((f) => ({ name: f.name, amount: f.amount, feeLabel: normalizeFeeLabel(f.name) })) });
+        } catch (e) { console.warn(`    fee sample (${cond}) skipped: ${e.message}`); }
+      }
+    }
+    if ((d.platform === "sm360" || d2cFeesRead) && !failed) {
       const agg = feeRows(d.id, feeStatements, todayEdmonton());
       totals.feeDealersRead++;
       if (agg.length) totals.feeDealersPublished++;
